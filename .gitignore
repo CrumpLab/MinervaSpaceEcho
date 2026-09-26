@@ -1,0 +1,15 @@
+# Build output
+build*/
+dist/
+*.zip
+
+# Generated / rendered audio (regenerate with mse-testgen)
+test-audio/
+renders/
+*.wav
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp

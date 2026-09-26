@@ -333,7 +333,7 @@ MinervaSpaceEcho/
     Clock              (host-synced or free segmenting)
     MemoryPolicy       (write gates, full policies, decay, locks)
   plugin/        JUCE wrapper: parameters, state, host clock, editor
-  tools/render/  offline CLI: WAV in → WAV out with a parameter preset
+  tools/          mse-render (WAV in → WAV out with a parameter preset), mse-testgen
   tests/         unit + regression tests (e.g. "capacity 1 == plain delay")
   .github/workflows/  macOS universal AU/VST3 build + pluginval
 ```
@@ -360,7 +360,8 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 
 ### Stage 0: Scaffolding
 - Repo layout, CMake, JUCE via FetchContent, engine library, test framework.
-- Offline render CLI (WAV in/out, parameters from a JSON preset).
+- Offline render CLI (WAV in/out, parameters from a `key = value` preset file
+  using the plugin's parameter IDs).
 - **Test-audio generator** (deterministic, seeded; nothing copyrighted):
   - synthetic drum loops, including variations and fills
   - chord progressions and a bass line at 120 BPM
@@ -371,6 +372,9 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Plugin that loads in Live and passes audio through. Generic parameter UI.
 - CI: macOS universal AU/VST3 build + pluginval; Linux engine tests.
 - **Done when:** you load the pass-through plugin in Live from a CI build.
+- **Status:** implemented. Engine, tools and tests pass; the Linux VST3 passes
+  pluginval at strictness 10. Waiting on the first macOS CI build and a check
+  in Live.
 
 ### Stage 1: Tape = Memory (segment cue, blend)
 - Clock: free (ms) and host-synced (beats/bars) segmenting.

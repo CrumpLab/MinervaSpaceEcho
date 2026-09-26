@@ -1,0 +1,113 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (engine tests, tools, VST3 + pluginval)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev \
+            libgl1-mesa-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate test audio and render smoke test
+        run: |
+          build/tools/mse-testgen test-audio
+          build/tools/mse-render --preset presets/passthrough.txt test-audio/full_mix_120bpm.wav rendered.wav
+          cmp test-audio/full_mix_120bpm.wav rendered.wav  # pass-through must be bit-exact
+
+      - name: pluginval (VST3)
+        run: |
+          curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level 10 --validate-in-process \
+            "build/plugin/MinervaSpaceEcho_artefacts/Release/VST3/MINERVA Space Echo.vst3"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-audio
+          path: test-audio
+          retention-days: 14
+
+  macos:
+    name: macOS (universal AU + VST3 + pluginval)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: brew list ninja >/dev/null 2>&1 || brew install ninja
+
+      - name: Configure (universal arm64 + x86_64)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Check universal binaries and ad-hoc sign
+        run: |
+          ART="build/plugin/MinervaSpaceEcho_artefacts/Release"
+          lipo -info "$ART/VST3/MINERVA Space Echo.vst3/Contents/MacOS/MINERVA Space Echo"
+          lipo -info "$ART/AU/MINERVA Space Echo.component/Contents/MacOS/MINERVA Space Echo"
+          codesign --force --deep --sign - "$ART/VST3/MINERVA Space Echo.vst3"
+          codesign --force --deep --sign - "$ART/AU/MINERVA Space Echo.component"
+
+      - name: Install plugins for validation
+        run: |
+          ART="build/plugin/MinervaSpaceEcho_artefacts/Release"
+          mkdir -p ~/Library/Audio/Plug-Ins/Components ~/Library/Audio/Plug-Ins/VST3
+          cp -R "$ART/AU/MINERVA Space Echo.component" ~/Library/Audio/Plug-Ins/Components/
+          cp -R "$ART/VST3/MINERVA Space Echo.vst3" ~/Library/Audio/Plug-Ins/VST3/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -a | grep -i crumplab || true
+
+      - name: auval
+        run: auval -strict -v aufx MnSE Crmp
+
+      - name: pluginval (VST3 + AU)
+        run: |
+          curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          PV=pluginval.app/Contents/MacOS/pluginval
+          $PV --strictness-level 10 --validate-in-process "$HOME/Library/Audio/Plug-Ins/VST3/MINERVA Space Echo.vst3"
+          $PV --strictness-level 10 --validate-in-process "$HOME/Library/Audio/Plug-Ins/Components/MINERVA Space Echo.component"
+
+      - name: Package
+        run: |
+          ART="build/plugin/MinervaSpaceEcho_artefacts/Release"
+          mkdir -p dist
+          cp -R "$ART/AU/MINERVA Space Echo.component" dist/
+          cp -R "$ART/VST3/MINERVA Space Echo.vst3" dist/
+          cp README.md LICENSE dist/
+          ditto -c -k --sequesterRsrc --keepParent dist MinervaSpaceEcho-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MinervaSpaceEcho-macOS
+          path: MinervaSpaceEcho-macOS.zip
+          retention-days: 30
