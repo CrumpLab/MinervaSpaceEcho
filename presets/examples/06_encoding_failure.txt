@@ -1,0 +1,6 @@
+# Lf = 0.7: stored addresses are mostly forgotten; retrieval gets hazier (echo only).
+capacity = 100
+power = 3
+encoding_failure = 0.7
+self_match = off
+dry_level_db = -60

@@ -372,9 +372,8 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Plugin that loads in Live and passes audio through. Generic parameter UI.
 - CI: macOS universal AU/VST3 build + pluginval; Linux engine tests.
 - **Done when:** you load the pass-through plugin in Live from a CI build.
-- **Status:** implemented. Engine, tools and tests pass; the Linux VST3 passes
-  pluginval at strictness 10. Waiting on the first macOS CI build and a check
-  in Live.
+- **Status:** done. CI green on Linux and macOS (universal AU/VST3, auval,
+  pluginval).
 
 ### Stage 1: Tape = Memory (segment cue, blend)
 - Clock: free (ms) and host-synced (beats/bars) segmenting.
@@ -388,6 +387,24 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Renders comparing capacity 1 / 8 / 64 and POWER 1 / 3 / 9 on drum loops,
   chords, voice.
 - **Done when:** it's a playable "memory delay" in Live.
+- **Status:** implemented; awaiting a listen in Live. Built as planned, plus:
+  - **Cue gate** (default −60 dBFS). Features are level-independent, so
+    without it the noise floor between phrases cued full-level echoes.
+  - **Echo level tracking** (0–1, default 1). The echo is scaled by
+    cue level ÷ activation-weighted mean level of the retrieved traces. Memory
+    picks *what* returns; the input decides *how loud*. Without it, feedback
+    never decays with a full memory, because each repeat is rebuilt from
+    full-level traces. The factor is exactly 1 at capacity 1, so the delay
+    equivalence holds.
+  - Memory slots reserve up to 20 s each but are only touched as they fill:
+    100 × 1-bar traces use ~77 MB of real RAM.
+  - Changing capacity rebuilds memory on the message thread and swaps it in
+    without blocking the audio thread. Memory is cleared for now; preserving
+    traces across resizes stays in Stage 2.
+  - Features come from a 24-band biquad filterbank pooled into 16 slots
+    (works for any trace length, 10 ms – 20 s; no FFT needed).
+  - Segments with < 50 % coverage (e.g. after a transport jump) cue memory
+    but are not stored.
 
 ### Stage 2: Memory management
 - Write gates: level, novelty, familiarity, probability, manual capture,

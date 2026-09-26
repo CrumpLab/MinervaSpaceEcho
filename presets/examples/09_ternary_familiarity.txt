@@ -1,0 +1,8 @@
+# Classic MINERVA ternary features + familiarity-gated loudness, self-match off:
+# the echo is loud only when the cue resembles earlier bars (echo only).
+capacity = 100
+feature_mode = Ternary
+power = 3
+self_match = off
+normalization = Familiarity
+dry_level_db = -60

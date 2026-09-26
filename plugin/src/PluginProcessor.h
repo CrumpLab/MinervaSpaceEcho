@@ -6,10 +6,12 @@
 
 // JUCE wrapper around mse::EchoEngine. All DSP lives in the engine; this class
 // only maps host parameters, transport and state onto it.
-class MinervaSpaceEchoProcessor final : public juce::AudioProcessor
+class MinervaSpaceEchoProcessor final : public juce::AudioProcessor,
+                                        private juce::Timer
 {
 public:
     MinervaSpaceEchoProcessor();
+    ~MinervaSpaceEchoProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -24,7 +26,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -37,19 +39,22 @@ public:
 
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
 
-    // Thread-safe snapshot of the last host clock, for the editor.
+    // Thread-safe accessors for the editor.
     mse::HostClock getClockForUi() const noexcept;
+    mse::EngineStats getStats() const noexcept { return engine.getStats(); }
+    void clearMemory() noexcept { engine.requestClear(); }
 
-    // Parameter IDs match the offline renderer's preset keys.
-    static constexpr const char* kOutputGainId = "output_gain_db";
-    static constexpr int kStateVersion = 1;
+    static constexpr int kStateVersion = 2;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     mse::HostClock readHostClock();
+    mse::EngineParams readParams() const noexcept;
+    void applyMemoryConfig();
+    void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
-    std::atomic<float>* outputGainDb = nullptr;
+    std::array<std::atomic<float>*, mse::kNumParams> rawParams {};
 
     mse::EchoEngine engine;
 

@@ -1,0 +1,3 @@
+# Capacity 1: MINERVA reduces to a plain 1-bar tape delay (echo only).
+capacity = 1
+dry_level_db = -60

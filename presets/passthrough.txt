@@ -1,3 +1,6 @@
-# Stage 0 preset: unity pass-through.
-# One `key = value` per line; keys are the plugin's parameter IDs.
+# Unity pass-through: echo off, dry at 0 dB.
+# One `key = value` per line; keys are the plugin's parameter IDs
+# (run `mse-render --help` for the full list).
+echo_level_db = -60
+dry_level_db = 0
 output_gain_db = 0

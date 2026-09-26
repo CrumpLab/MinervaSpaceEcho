@@ -23,11 +23,9 @@ void usage()
         "  --free            no host tempo (free-running clock)\n"
         "  --block <n>       block size in samples (default 512)\n"
         "  --tail <sec>      append this much silence to hear echo tails (default 0)\n"
+        "  --seed <n>        random seed for encoding failure (default 1)\n"
         "  --pcm24           write 24-bit PCM instead of 32-bit float\n"
-        "parameters:");
-    for (const auto& id : mse::tools::paramIds())
-        std::printf (" %s", id.c_str());
-    std::printf ("\n");
+        "parameters (--set id=value):\n%s", mse::tools::describeParams().c_str());
 }
 
 } // namespace
@@ -39,6 +37,7 @@ int main (int argc, char** argv)
     double bpm = 120.0, tailSeconds = 0.0;
     bool freeRunning = false;
     int blockSize = 512;
+    uint64_t seed = 1;
     auto format = mse::tools::WavFormat::Float32;
 
     for (int i = 1; i < argc; ++i)
@@ -58,6 +57,7 @@ int main (int argc, char** argv)
         else if (a == "--free") freeRunning = true;
         else if (a == "--block") blockSize = std::stoi (next());
         else if (a == "--tail") tailSeconds = std::stod (next());
+        else if (a == "--seed") seed = std::stoull (next());
         else if (a == "--pcm24") format = mse::tools::WavFormat::Pcm24;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (! a.empty() && a[0] == '-') { std::fprintf (stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
@@ -72,11 +72,12 @@ int main (int argc, char** argv)
 
     try
     {
-        mse::EngineParams params;
+        auto values = mse::defaultParamValues();
         if (! presetPath.empty())
-            mse::tools::applyPresetFile (params, presetPath);
+            mse::tools::applyPresetFile (values, presetPath);
         for (const auto& s : assignments)
-            mse::tools::applyAssignment (params, s);
+            mse::tools::applyAssignment (values, s);
+        const auto params = mse::paramsFromValues (values);
 
         auto audio = mse::tools::readWav (positional[0]);
         const int numCh = std::min (audio.numChannels(), mse::EchoEngine::kMaxChannels);
@@ -86,6 +87,10 @@ int main (int argc, char** argv)
             ch.resize (ch.size() + static_cast<size_t> (tail), 0.0f);
 
         mse::EchoEngine engine;
+        mse::MemoryConfig memory;
+        memory.capacity = params.capacity;
+        engine.setMemoryConfig (memory);
+        engine.setSeed (seed);
         engine.setParams (params);
         engine.prepare (audio.sampleRate, blockSize, numCh);
 
@@ -106,8 +111,13 @@ int main (int argc, char** argv)
         }
 
         mse::tools::writeWav (positional[1], audio, format);
-        std::printf ("rendered %s -> %s (%.2f s, %d ch, engine %s)\n", positional[0].c_str(),
-                     positional[1].c_str(), total / audio.sampleRate, numCh, mse::versionString());
+        const auto st = engine.getStats();
+        std::printf ("rendered %s -> %s (%.2f s, %d ch, engine %s)\n"
+                     "  memory %d/%d traces, %llu stored, trace %.3f s, last echo: %d traces, intensity %.3f\n",
+                     positional[0].c_str(), positional[1].c_str(), total / audio.sampleRate, numCh,
+                     mse::versionString(), st.tracesStored, st.capacity,
+                     static_cast<unsigned long long> (st.segments), st.traceSeconds, st.activeTraces,
+                     static_cast<double> (st.intensity));
     }
     catch (const std::exception& e)
     {

@@ -1,0 +1,4 @@
+# Power 9: the echo narrows to the closest memories (echo only).
+capacity = 100
+power = 9
+dry_level_db = -60

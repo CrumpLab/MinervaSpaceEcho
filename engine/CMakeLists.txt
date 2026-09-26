@@ -2,6 +2,10 @@
 # tested and used for offline renders anywhere.
 add_library(mse_engine STATIC
     src/EchoEngine.cpp
+    src/Features.cpp
+    src/Params.cpp
+    src/Retrieval.cpp
+    src/TraceStore.cpp
 )
 add_library(mse::engine ALIAS mse_engine)
 

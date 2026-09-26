@@ -1,0 +1,4 @@
+# Power 1: every memory contributes - a blurred schema (echo only).
+capacity = 100
+power = 1
+dry_level_db = -60

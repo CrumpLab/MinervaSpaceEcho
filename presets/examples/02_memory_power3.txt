@@ -1,0 +1,4 @@
+# 100-trace memory, default activation power 3 (echo only).
+capacity = 100
+power = 3
+dry_level_db = -60

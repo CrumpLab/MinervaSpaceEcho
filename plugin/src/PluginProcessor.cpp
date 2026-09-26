@@ -1,23 +1,80 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace {
+
+juce::NormalisableRange<float> rangeFor (const mse::ParamSpec& s)
+{
+    juce::NormalisableRange<float> r (s.min, s.max, s.type == mse::ParamType::Int ? 1.0f : 0.0f);
+    if (s.skewCentre > s.min && s.skewCentre < s.max)
+        r.setSkewForCentre (s.skewCentre);
+    return r;
+}
+
+} // namespace
+
 MinervaSpaceEchoProcessor::MinervaSpaceEchoProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "MinervaSpaceEcho", createLayout())
 {
-    outputGainDb = parameters.getRawParameterValue (kOutputGainId);
+    const auto& specs = mse::paramSpecs();
+    for (size_t i = 0; i < specs.size(); ++i)
+        rawParams[i] = parameters.getRawParameterValue (specs[i].id);
+
+    startTimerHz (10);
+}
+
+MinervaSpaceEchoProcessor::~MinervaSpaceEchoProcessor()
+{
+    stopTimer();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout MinervaSpaceEchoProcessor::createLayout()
 {
+    // Built from the engine's parameter table: IDs match mse-render presets.
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { kOutputGainId, 1 }, "Output Gain",
-        juce::NormalisableRange<float> (-60.0f, 12.0f, 0.1f), 0.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("dB")));
+    for (const auto& s : mse::paramSpecs())
+    {
+        const juce::ParameterID id { s.id, 1 };
+        switch (s.type)
+        {
+            case mse::ParamType::Float:
+                layout.add (std::make_unique<juce::AudioParameterFloat> (
+                    id, s.name, rangeFor (s), s.def,
+                    juce::AudioParameterFloatAttributes().withLabel (s.unit).withAutomatable (s.automatable)));
+                break;
+            case mse::ParamType::Int:
+                layout.add (std::make_unique<juce::AudioParameterInt> (
+                    id, s.name, static_cast<int> (s.min), static_cast<int> (s.max), static_cast<int> (s.def),
+                    juce::AudioParameterIntAttributes().withLabel (s.unit).withAutomatable (s.automatable)));
+                break;
+            case mse::ParamType::Bool:
+                layout.add (std::make_unique<juce::AudioParameterBool> (
+                    id, s.name, s.def > 0.5f, juce::AudioParameterBoolAttributes().withAutomatable (s.automatable)));
+                break;
+            case mse::ParamType::Choice:
+            {
+                juce::StringArray choices;
+                for (int c = 0; c < s.numChoices; ++c)
+                    choices.add (s.choices[c]);
+                layout.add (std::make_unique<juce::AudioParameterChoice> (
+                    id, s.name, choices, static_cast<int> (s.def),
+                    juce::AudioParameterChoiceAttributes().withAutomatable (s.automatable)));
+                break;
+            }
+        }
+    }
     return layout;
+}
+
+mse::EngineParams MinervaSpaceEchoProcessor::readParams() const noexcept
+{
+    mse::ParamValues v {};
+    for (size_t i = 0; i < v.size(); ++i)
+        v[i] = rawParams[i]->load (std::memory_order_relaxed);
+    return mse::paramsFromValues (v);
 }
 
 bool MinervaSpaceEchoProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -28,11 +85,38 @@ bool MinervaSpaceEchoProcessor::isBusesLayoutSupported (const BusesLayout& layou
     return layouts.getMainInputChannelSet() == out;
 }
 
+void MinervaSpaceEchoProcessor::applyMemoryConfig()
+{
+    mse::MemoryConfig cfg = engine.getMemoryConfig();
+    cfg.capacity = readParams().capacity;
+    engine.setMemoryConfig (cfg); // no-op when unchanged
+}
+
+void MinervaSpaceEchoProcessor::timerCallback()
+{
+    // Message thread: structural changes (memory reallocation) and freeing
+    // memory the audio thread has let go of.
+    applyMemoryConfig();
+    engine.collectGarbage();
+}
+
 void MinervaSpaceEchoProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.setParams ({ outputGainDb->load() });
+    applyMemoryConfig();
+    engine.setParams (readParams());
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     fallbackPpq = 0.0;
+}
+
+double MinervaSpaceEchoProcessor::getTailLengthSeconds() const
+{
+    const auto p = readParams();
+    const double bpm = std::max (20.0, uiClock.bpm.load());
+    const double trace = p.syncMode == mse::SyncMode::Tempo
+                             ? mse::divisionQuarters (p.traceDivision, 4, 4) * 60.0 / bpm
+                             : p.traceMs * 0.001;
+    // One repeat without feedback; a generous allowance with it.
+    return std::min (60.0, trace * (p.feedback > 0.0f ? 8.0 : 1.0));
 }
 
 mse::HostClock MinervaSpaceEchoProcessor::readHostClock()
@@ -74,7 +158,7 @@ void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     // the transport stopped (plan §6).
     fallbackPpq = clock.ppqPosition + buffer.getNumSamples() / getSampleRate() * clock.bpm / 60.0;
 
-    engine.setParams ({ outputGainDb->load() });
+    engine.setParams (readParams());
     engine.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples(), clock);
 
     uiClock.hasTempo.store (clock.hasTempo, std::memory_order_relaxed);
@@ -112,6 +196,7 @@ void MinervaSpaceEchoProcessor::getStateInformation (juce::MemoryBlock& destData
 
 void MinervaSpaceEchoProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
+    // Parameters missing from older states keep their defaults.
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
             parameters.replaceState (juce::ValueTree::fromXml (*xml));

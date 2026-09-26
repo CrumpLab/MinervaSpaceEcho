@@ -1,26 +1,28 @@
 #pragma once
 
-#include "mse/EchoEngine.h"
+#include "mse/Params.h"
 
 #include <string>
 #include <vector>
 
 namespace mse::tools {
 
-// Engine parameters are addressed by the same IDs the plugin uses, so a
-// preset file behaves the same offline and in Live.
+// Parameters are addressed by the plugin's parameter IDs (mse::paramSpecs()),
+// so a preset behaves the same offline and in Live.
 //
 // Preset file format: one `key = value` per line, `#` starts a comment.
+// Choice parameters accept a choice name ("Tempo", "1 bar") or an index;
+// on/off parameters accept on/off/true/false/1/0.
 
 // Sets one parameter. Throws std::runtime_error on an unknown key or bad value.
-void applyParam (EngineParams& params, const std::string& key, const std::string& value);
+void applyParam (ParamValues& values, const std::string& key, const std::string& value);
 
 // Parses `key=value`. Throws on malformed input.
-void applyAssignment (EngineParams& params, const std::string& assignment);
+void applyAssignment (ParamValues& values, const std::string& assignment);
 
-void applyPresetFile (EngineParams& params, const std::string& path);
+void applyPresetFile (ParamValues& values, const std::string& path);
 
-// All known parameter IDs, for --help output.
-std::vector<std::string> paramIds();
+// Human-readable list of parameters, ranges and defaults (for --help).
+std::string describeParams();
 
 } // namespace mse::tools

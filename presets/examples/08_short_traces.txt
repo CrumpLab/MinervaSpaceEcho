@@ -1,0 +1,7 @@
+# 125 ms free-running traces: a granular-ish memory of short slices (echo only).
+sync_mode = Free
+trace_ms = 125
+capacity = 200
+power = 5
+self_match = off
+dry_level_db = -60

@@ -38,6 +38,9 @@ jobs:
           build/tools/mse-render --preset presets/passthrough.txt test-audio/full_mix_120bpm.wav rendered.wav
           cmp test-audio/full_mix_120bpm.wav rendered.wav  # pass-through must be bit-exact
 
+      - name: Render example presets
+        run: scripts/render_examples.sh build renders
+
       - name: pluginval (VST3)
         run: |
           curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
@@ -47,8 +50,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: test-audio
-          path: test-audio
+          name: example-renders
+          path: renders
           retention-days: 14
 
   macos:
