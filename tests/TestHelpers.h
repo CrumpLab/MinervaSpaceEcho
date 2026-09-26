@@ -1,7 +1,7 @@
 #pragma once
 
 #include "TestSignals.h"
-#include "Wav.h"
+#include "mse/Wav.h"
 
 #include "mse/EchoEngine.h"
 
@@ -18,7 +18,7 @@ struct RunOptions
 };
 
 // Runs `audio` through `engine` in blocks with a steadily advancing host clock.
-inline tools::AudioBuffer run (EchoEngine& engine, tools::AudioBuffer audio, const RunOptions& o = {})
+inline AudioBuffer run (EchoEngine& engine, AudioBuffer audio, const RunOptions& o = {})
 {
     const int n = audio.numSamples();
     const int ch = audio.numChannels();
@@ -57,15 +57,15 @@ inline EngineParams wetOnly()
     return p;
 }
 
-inline tools::AudioBuffer silence (int channels, int samples, double sr = 48000.0)
+inline AudioBuffer silence (int channels, int samples, double sr = 48000.0)
 {
-    tools::AudioBuffer b;
+    AudioBuffer b;
     b.sampleRate = sr;
     b.resize (channels, samples);
     return b;
 }
 
-inline tools::AudioBuffer slice (const tools::AudioBuffer& b, int start, int len)
+inline AudioBuffer slice (const AudioBuffer& b, int start, int len)
 {
     auto out = silence (b.numChannels(), len, b.sampleRate);
     for (size_t c = 0; c < b.channels.size(); ++c)
@@ -74,7 +74,7 @@ inline tools::AudioBuffer slice (const tools::AudioBuffer& b, int start, int len
     return out;
 }
 
-inline void append (tools::AudioBuffer& dst, const tools::AudioBuffer& src)
+inline void append (AudioBuffer& dst, const AudioBuffer& src)
 {
     if (dst.channels.empty())
         dst.channels.resize (src.channels.size());
@@ -84,7 +84,7 @@ inline void append (tools::AudioBuffer& dst, const tools::AudioBuffer& src)
 }
 
 // Pearson correlation of channel 0.
-inline double correlation (const tools::AudioBuffer& a, const tools::AudioBuffer& b)
+inline double correlation (const AudioBuffer& a, const AudioBuffer& b)
 {
     const auto& x = a.channels[0];
     const auto& y = b.channels[0];
@@ -102,7 +102,7 @@ inline double correlation (const tools::AudioBuffer& a, const tools::AudioBuffer
     return (vx <= 0 || vy <= 0) ? 0.0 : cov / std::sqrt (vx * vy);
 }
 
-inline double rms (const tools::AudioBuffer& a)
+inline double rms (const AudioBuffer& a)
 {
     double s = 0;
     size_t n = 0;

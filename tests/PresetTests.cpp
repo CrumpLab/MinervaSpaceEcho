@@ -53,25 +53,45 @@ TEST_CASE ("Preset files support comments and blank lines")
 
 TEST_CASE ("Parameter table defaults match EngineParams defaults")
 {
-    const auto fromTable = paramsFromValues (defaultParamValues());
-    const EngineParams fromStruct;
-    REQUIRE (fromTable.syncMode == fromStruct.syncMode);
-    REQUIRE (fromTable.traceMs == fromStruct.traceMs);
-    REQUIRE (fromTable.traceDivision == fromStruct.traceDivision);
-    REQUIRE (fromTable.capacity == fromStruct.capacity);
-    REQUIRE (fromTable.power == fromStruct.power);
-    REQUIRE (fromTable.similarity == fromStruct.similarity);
-    REQUIRE (fromTable.featureMode == fromStruct.featureMode);
-    REQUIRE (fromTable.ternaryThreshold == fromStruct.ternaryThreshold);
-    REQUIRE (fromTable.encodingFailure == fromStruct.encodingFailure);
-    REQUIRE (fromTable.selfMatch == fromStruct.selfMatch);
-    REQUIRE (fromTable.cueGateDb == fromStruct.cueGateDb);
-    REQUIRE (fromTable.negativeMode == fromStruct.negativeMode);
-    REQUIRE (fromTable.normalization == fromStruct.normalization);
-    REQUIRE (fromTable.levelTracking == fromStruct.levelTracking);
-    REQUIRE (fromTable.feedback == fromStruct.feedback);
-    REQUIRE (fromTable.echoLevelDb == fromStruct.echoLevelDb);
-    REQUIRE (fromTable.dryLevelDb == fromStruct.dryLevelDb);
-    REQUIRE (fromTable.edgeFadeMs == fromStruct.edgeFadeMs);
-    REQUIRE (fromTable.outputGainDb == fromStruct.outputGainDb);
+    REQUIRE (paramsFromValues (defaultParamValues()) == EngineParams {});
+}
+
+TEST_CASE ("Parameter table IDs are unique and every choice default is valid")
+{
+    const auto& specs = paramSpecs();
+    for (size_t i = 0; i < specs.size(); ++i)
+    {
+        INFO (specs[i].id);
+        REQUIRE (findParam (specs[i].id) == static_cast<int> (i));
+        REQUIRE (specs[i].def >= specs[i].min);
+        REQUIRE (specs[i].def <= specs[i].max);
+        if (specs[i].type == ParamType::Choice || specs[i].type == ParamType::Bool)
+            REQUIRE (specs[i].max == static_cast<float> (specs[i].numChoices - 1));
+    }
+}
+
+TEST_CASE ("Preset files can schedule parameter changes and commands at bars")
+{
+    const auto path = (std::filesystem::temp_directory_path() / "mse_preset_timed.txt").string();
+    {
+        std::ofstream f (path);
+        f << "power = 5\n@8 freeze = on\n@2.5 command = clamp_all\n";
+    }
+    auto v = defaultParamValues();
+    std::vector<tools::TimedAssignment> timed;
+    tools::applyPresetFile (v, path, &timed);
+    REQUIRE (v[kPower] == 5.0f);
+    REQUIRE (v[kFreeze] == 0.0f); // timed lines don't apply immediately
+    REQUIRE (timed.size() == 2);
+    REQUIRE (timed[0].bar == 8.0);
+    REQUIRE (timed[1].bar == 2.5);
+    REQUIRE (tools::parseCommand (timed[1].value) == Command::ClampAll);
+
+    REQUIRE_THROWS (tools::applyPresetFile (v, path)); // timed lines need a receiver
+    {
+        std::ofstream f (path);
+        f << "@4 command = dance\n";
+    }
+    REQUIRE_THROWS (tools::applyPresetFile (v, path, &timed));
+    std::filesystem::remove (path);
 }

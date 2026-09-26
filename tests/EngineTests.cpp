@@ -139,13 +139,13 @@ namespace {
 
 // Bars A B C A' (A' identical to A) followed by one bar of silence. Returns
 // the echo heard during the silent bar, i.e. memory's answer to the cue A'.
-tools::AudioBuffer answerToRepeatedBar (float power, bool selfMatch = false)
+AudioBuffer answerToRepeatedBar (float power, bool selfMatch = false)
 {
     const auto o = bars (1);
     const auto a = testgen::drums (o);
     const auto b = testgen::chordsBass (o);
     const auto c = testgen::melody (o);
-    tools::AudioBuffer in;
+    AudioBuffer in;
     append (in, a);
     append (in, b);
     append (in, c);
@@ -224,7 +224,7 @@ TEST_CASE ("Memory config changes are applied at the next block, and clear works
     run (engine, silence (2, 512));
     engine.collectGarbage();
     REQUIRE (engine.getStats().capacity == 5);
-    REQUIRE (engine.getStats().tracesStored == 0); // Stage 1: rebuilding clears memory
+    REQUIRE (engine.getStats().tracesStored == 3); // resizing keeps traces (bar 3 committed at this block)
 
     run (engine, testgen::fullMix (bars (2)));
     REQUIRE (engine.getStats().tracesStored > 0);
@@ -240,7 +240,7 @@ TEST_CASE ("Cue gate: near-silent segments evoke no echo")
     for (auto& ch : quiet.channels)
         for (float& x : ch)
             x *= 0.0005f; // ~ -70 dBFS
-    tools::AudioBuffer in;
+    AudioBuffer in;
     append (in, testgen::fullMix (o));
     append (in, quiet);
     append (in, silence (2, kBar));
@@ -263,7 +263,7 @@ TEST_CASE ("Cue gate: near-silent segments evoke no echo")
 
 TEST_CASE ("Level tracking: echoes follow the cue's level, so feedback decays with a full memory")
 {
-    tools::AudioBuffer in;
+    AudioBuffer in;
     append (in, testgen::fullMix (bars (4)));
     append (in, silence (2, 12 * kBar));
 
@@ -291,7 +291,7 @@ TEST_CASE ("Level tracking: a quiet cue gives a proportionally quiet echo")
     for (auto& ch : quiet.channels)
         for (float& x : ch)
             x *= 0.1f;
-    tools::AudioBuffer in;
+    AudioBuffer in;
     append (in, loud);
     append (in, quiet);
     append (in, silence (2, kBar));

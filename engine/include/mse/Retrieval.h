@@ -40,8 +40,19 @@ struct RetrievalResult
 };
 
 // Cues every stored trace with `probe` and writes the non-negligible echo
-// weights to `out` (which must hold store.capacity() entries).
+// weights to `out` (which must hold store.capacity() entries). A trace's
+// activation is scaled by its strength (which decays over time).
 RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
                           const RetrievalSettings& settings, EchoWeight* out) noexcept;
+
+struct BestMatch
+{
+    int position = -1;   // storage position of the most similar trace, or -1
+    float similarity = -2.0f;
+};
+
+// The stored trace most similar to `probe` (optionally ignoring clamped ones).
+BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Similarity kind,
+                     bool unclampedOnly) noexcept;
 
 } // namespace mse

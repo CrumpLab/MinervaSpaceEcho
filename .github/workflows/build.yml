@@ -30,7 +30,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Unit tests
-        run: ctest --test-dir build --output-on-failure
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
 
       - name: Generate test audio and render smoke test
         run: |

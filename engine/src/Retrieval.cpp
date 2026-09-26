@@ -54,7 +54,8 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
         if (slot == settings.excludeSlot)
             continue;
 
-        float a = activation (similarity (probe, store.slot (slot).features, settings.similarity), settings.power);
+        const auto& trace = store.slot (slot);
+        float a = activation (similarity (probe, trace.features, settings.similarity), settings.power) * trace.strength;
         if (settings.negativeMode == NegativeMode::Ignore)
             a = std::max (a, 0.0f);
         else if (settings.negativeMode == NegativeMode::Absolute)
@@ -88,6 +89,21 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
     }
     r.numWeights = kept;
     return r;
+}
+
+BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Similarity kind, bool unclampedOnly) noexcept
+{
+    BestMatch best;
+    for (int i = 0; i < store.size(); ++i)
+    {
+        const auto& t = store.slot (store.storedSlot (i));
+        if (unclampedOnly && t.clamped)
+            continue;
+        const float s = similarity (probe, t.features, kind);
+        if (s > best.similarity)
+            best = { i, s };
+    }
+    return best;
 }
 
 } // namespace mse

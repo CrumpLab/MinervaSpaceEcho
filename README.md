@@ -8,11 +8,13 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 1 ("Tape = Memory").** The plugin cuts the input into traces
+**Status: Stage 2 (memory management).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
-Capacity = 1 it is exactly a 1-bar tape delay.
+Capacity = 1 it is exactly a 1-bar tape delay. Stage 2 adds control over what
+memory keeps: freezing, write gates, clamping, full-memory policies,
+consolidation, forgetting, echo re-encoding, and saving and loading memory.
 
 ## How it behaves
 
@@ -30,7 +32,19 @@ At every trace boundary (e.g. each bar line):
 | Parameter | What it does |
 |---|---|
 | **Sync** / **Trace Length (Sync)** / **Trace Length (Free)** | Trace length: 1/16 … 4 bars following Live's tempo, or 10 ms … 20 s free-running. Tempo-synced traces align to Live's bar grid. |
-| **Memory Capacity** | Max traces (1–1000). When full, the oldest trace is replaced (FIFO). Changing it rebuilds (and clears) memory. |
+| **Memory Capacity** / **Memory Budget** | Max traces (1–1000) and the audio memory reserved for them (128 MB – 4 GB; with many traces the budget limits the longest trace). Changing either keeps the traces (clamped first, then newest). |
+| **When Full** | Which trace makes room: Oldest, Random, Least Used (lowest recent activation), Weakest (most faded), Merge Similar (average the new bar into its closest unclamped trace), or Reject (keep what's there). |
+| **Consolidate Above** | Merge a new bar into an existing trace whenever they are at least this similar, even if there is room (1 = off). Prototypes form. |
+| **Freeze Memory** | Stop storing and stop decay; memory keeps answering. |
+| **Write Mode** / **Capture** | Auto stores every bar that passes the gates; Manual stores only captured bars. Capture (parameter or button) stores the bar in progress, bypassing gates and freeze. |
+| **Write Gate** | Bars quieter than this aren't stored (−100 dB = off). |
+| **Novelty Gate** / **Novelty Threshold** | Store only novel bars (nothing in memory this similar) or only familiar ones. |
+| **Write Probability** | Chance that a bar is stored. |
+| **Record Source** | What gets stored: the Input (plus feedback), the Echo (memory feeds on itself; it keeps sustaining after the input stops), or both. |
+| **Clamp Incoming** / **Clamp Budget** / **Clamped Don't Decay** | Clamp newly stored bars; the most memory that may be clamped; whether clamped traces are exempt from forgetting. Clamped traces are never replaced. |
+| **Tape Dropouts** | At recording, each 1/32 of a trace may drop out. |
+| **Forgetting / Segment** / **Fading / Segment** | Each bar, stored traces lose features (weaker recall) and strength (weaker activation). Traces faded below −60 dB are forgotten. |
+| **Wear Tone** | Older traces play back duller. |
 | **Activation Power** | 1 = every memory contributes (a blurred "schema"); 9 = only the closest memories answer. |
 | **Similarity** | Hintzman (MINERVA II's normalised dot product) or Cosine. |
 | **Features** / **Ternary Threshold** | Continuous feature values, or classic MINERVA −1/0/+1 values. |
@@ -44,12 +58,24 @@ At every trace boundary (e.g. each bar line):
 | **Echo Level** / **Dry Level** / **Output Gain** | Mix. −60 dB = off. |
 | **Edge Fade** | Fade length at trace edges and when the echo changes (declicking). |
 
-The bottom of the plugin window shows memory fill, how many traces the current
-echo uses, its intensity (MINERVA's familiarity signal), the host clock, and a
-**Clear Memory** button.
+The bottom of the plugin window shows memory fill and clamping, what happened
+to the last bar (stored / merged / gated / rejected / frozen), how many traces
+the current echo uses, its intensity (MINERVA's familiarity signal) and the
+host clock. Buttons: **Capture**, **Clamp Last**, **Clamp All**, **Unclamp
+All**, **Clear Unclamped**, **Clear All**, **Save Memory…**, **Load Memory…**.
+
+**Saving memory.** *Save Memory…* writes a folder containing one WAV per trace
+plus `manifest.json` (addresses, clamp state, ages, strengths, and the
+parameters in use). *Load Memory…* reloads it, resampling if the sample rate
+differs. The folder is plain files, so you can inspect it or build one by
+hand. Memory is not saved with the Live set unless **Save Memory With Set** is
+on (sets can get large: about 23 MB per minute of stored audio).
 
 Listening examples: `scripts/render_examples.sh` renders every preset in
 `presets/examples/` (CI uploads them as the `example-renders` artifact).
+Presets can change settings partway through a render with timed lines such as
+`@8 freeze = on` or `@2 command = clamp_all`. `mse-render --save-memory DIR` and
+`--load-memory DIR` use the same folder format as the plugin.
 
 ## Repository layout
 

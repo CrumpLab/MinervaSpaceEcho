@@ -1,0 +1,8 @@
+# The first two bars are clamped into a 4-trace memory, so they never leave.
+# Later bars cycle through the other two slots (echo only).
+capacity = 4
+power = 9
+self_match = off
+clamp_incoming = on
+dry_level_db = -60
+@2 clamp_incoming = off

@@ -7,7 +7,7 @@
 
 namespace {
 
-float peak (const mse::tools::AudioBuffer& b)
+float peak (const mse::AudioBuffer& b)
 {
     float p = 0.0f;
     for (const auto& ch : b.channels)

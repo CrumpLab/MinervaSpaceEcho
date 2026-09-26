@@ -1,0 +1,7 @@
+# Freeze memory after style A. When style B arrives, memory can only answer
+# with style-A bars (echo only).
+capacity = 100
+power = 9
+self_match = off
+dry_level_db = -60
+@8.25 freeze = on

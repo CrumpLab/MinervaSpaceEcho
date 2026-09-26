@@ -3,6 +3,11 @@
 
 namespace {
 
+// Plugin state layout when memory is embedded (otherwise JUCE's plain XML
+// binary is used, as in earlier versions):
+//   "MSE3" | u32 xml length | xml | u64 memory length | memory blob
+constexpr char kStateMagic[4] = { 'M', 'S', 'E', '3' };
+
 juce::NormalisableRange<float> rangeFor (const mse::ParamSpec& s)
 {
     juce::NormalisableRange<float> r (s.min, s.max, s.type == mse::ParamType::Int ? 1.0f : 0.0f);
@@ -87,9 +92,52 @@ bool MinervaSpaceEchoProcessor::isBusesLayoutSupported (const BusesLayout& layou
 
 void MinervaSpaceEchoProcessor::applyMemoryConfig()
 {
+    const auto p = readParams();
     mse::MemoryConfig cfg = engine.getMemoryConfig();
-    cfg.capacity = readParams().capacity;
+    cfg.capacity = p.capacity;
+    cfg.budgetBytes = mse::memoryBudgetBytes (p.memoryBudgetIndex);
     engine.setMemoryConfig (cfg); // no-op when unchanged
+}
+
+void MinervaSpaceEchoProcessor::saveMemory (const juce::File& folder, std::function<void (juce::String)> done)
+{
+    auto snap = std::make_shared<mse::MemorySnapshot>();
+    if (! engine.takeSnapshot (*snap))
+    {
+        done ("Memory was busy; try again.");
+        return;
+    }
+    const auto& specs = mse::paramSpecs();
+    for (size_t i = 0; i < specs.size(); ++i)
+        snap->params.emplace_back (specs[i].id, rawParams[i]->load());
+
+    const auto path = folder.getFullPathName().toStdString();
+    juce::Thread::launch ([snap, path, done = std::move (done)] {
+        juce::String error;
+        try
+        {
+            mse::writeMemoryFolder (*snap, path);
+        }
+        catch (const std::exception& e)
+        {
+            error = e.what();
+        }
+        juce::MessageManager::callAsync ([done, error] { done (error); });
+    });
+}
+
+juce::String MinervaSpaceEchoProcessor::loadMemory (const juce::File& target)
+{
+    const auto folder = target.isDirectory() ? target : target.getParentDirectory();
+    try
+    {
+        engine.loadSnapshot (mse::readMemoryFolder (folder.getFullPathName().toStdString()));
+        return {};
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
 }
 
 void MinervaSpaceEchoProcessor::timerCallback()
@@ -190,13 +238,62 @@ void MinervaSpaceEchoProcessor::getStateInformation (juce::MemoryBlock& destData
 {
     auto state = parameters.copyState();
     state.setProperty ("stateVersion", kStateVersion, nullptr);
-    if (auto xml = state.createXml())
+    auto xml = state.createXml();
+    if (xml == nullptr)
+        return;
+
+    mse::MemorySnapshot snap;
+    if (! readParams().embedMemory || ! engine.takeSnapshot (snap))
+    {
         copyXmlToBinary (*xml, destData);
+        return;
+    }
+
+    // Memory embedded in the Live set (off by default: sets can get large).
+    const auto xmlText = xml->toString().toStdString();
+    const auto blob = mse::serializeMemory (snap);
+    juce::MemoryOutputStream out (destData, false);
+    out.write (kStateMagic, 4);
+    out.writeInt (static_cast<int> (xmlText.size()));
+    out.write (xmlText.data(), xmlText.size());
+    out.writeInt64 (static_cast<juce::int64> (blob.size()));
+    out.write (blob.data(), blob.size());
 }
 
 void MinervaSpaceEchoProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // Parameters missing from older states keep their defaults.
+    if (sizeInBytes > 8 && std::memcmp (data, kStateMagic, 4) == 0)
+    {
+        juce::MemoryInputStream in (data, static_cast<size_t> (sizeInBytes), false);
+        in.skipNextBytes (4);
+        const int xmlLen = in.readInt();
+        if (xmlLen <= 0 || xmlLen > in.getNumBytesRemaining())
+            return;
+        juce::MemoryBlock xmlBytes;
+        in.readIntoMemoryBlock (xmlBytes, xmlLen);
+        if (auto xml = juce::parseXML (xmlBytes.toString()))
+            if (xml->hasTagName (parameters.state.getType()))
+                parameters.replaceState (juce::ValueTree::fromXml (*xml));
+
+        const auto blobLen = in.readInt64();
+        if (blobLen > 0 && blobLen <= in.getNumBytesRemaining())
+        {
+            juce::MemoryBlock blob;
+            in.readIntoMemoryBlock (blob, static_cast<ssize_t> (blobLen));
+            try
+            {
+                applyMemoryConfig(); // fit the restored capacity before loading
+                engine.loadSnapshot (mse::deserializeMemory (static_cast<const uint8_t*> (blob.getData()), blob.getSize()));
+            }
+            catch (const std::exception&)
+            {
+                // A damaged memory blob must not prevent the parameters from loading.
+            }
+        }
+        return;
+    }
+
+    // Plain parameter state. Parameters missing from older states keep their defaults.
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
             parameters.replaceState (juce::ValueTree::fromXml (*xml));

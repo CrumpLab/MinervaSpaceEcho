@@ -8,74 +8,121 @@
 
 namespace mse {
 
-// Memory configuration (structural: changing it rebuilds the store).
+// Memory configuration (structural: changing it rebuilds the store; traces are
+// carried over, see TraceStore::adoptFrom).
 struct MemoryConfig
 {
     int capacity = 100;
-    double budgetBytes = 1.0e9;     // upper bound on reserved audio memory
+    double budgetBytes = 1.024e9;   // upper bound on reserved audio memory
     double maxTraceSeconds = 20.0;
 
     bool operator== (const MemoryConfig&) const = default;
 };
 
 // One slot of memory. Audio is valid in [begin, end); anything outside reads
-// as silence (begin > 0 when recording started mid-segment).
+// as silence (begin > 0 when recording started mid-segment). Each slot owns a
+// buffer of maxLen samples per channel; buffers can move between stores.
 struct TraceSlot
 {
     float* audio[2] = { nullptr, nullptr };
+    int64_t maxLen = 0;
     int64_t begin = 0;
     int64_t end = 0;
-    uint64_t serial = 0;      // monotonically increasing store order
+
+    uint64_t serial = 0;      // store order; age in segments = store serial - serial
     float rms = 0.0f;         // mono RMS of the recorded audio
+    float strength = 1.0f;    // decays over time; multiplies the trace's activation
+    float useCount = 0.0f;    // accumulated |activation| (slowly decaying)
+    int generation = 0;       // 0 = heard; n = echo of generation n-1 material
+    int mergeCount = 1;       // how many segments were consolidated into this trace
+    bool clamped = false;     // clamped traces are never replaced (or decayed, optionally)
     FeatureVector features {};
+
+    void resetMeta() noexcept
+    {
+        begin = end = 0;
+        serial = 0;
+        rms = 0.0f;
+        strength = 1.0f;
+        useCount = 0.0f;
+        generation = 0;
+        mergeCount = 1;
+        clamped = false;
+    }
 };
 
-// The memory matrix. Holds capacity + 1 preallocated slots: `capacity` traces
-// plus one spare that is always the recording target. Committing the spare is
-// O(1) (no copying), and a trace evicted to make room becomes the new spare.
+// The memory matrix: `capacity` traces plus kSpares recording slots (one for
+// the input, one for the echo). Committing a spare is O(1): the slot simply
+// joins memory and a free slot becomes the new spare. No audio is copied.
 //
-// Audio storage is reserved uninitialised, so on macOS/Linux untouched pages
-// cost no physical RAM: 100 slots of 20 s reserve ~768 MB of address space but
-// 1-bar traces only use ~77 MB.
+// Audio buffers are reserved uninitialised, so on macOS/Linux untouched pages
+// cost no physical RAM.
 //
 // Not thread-safe: owned and used by the audio thread once installed.
 class TraceStore
 {
 public:
+    static constexpr int kSpares = 2;
+    static constexpr int kInputSpare = 0;
+    static constexpr int kEchoSpare = 1;
+
     TraceStore (const MemoryConfig& config, double sampleRate, int numChannels);
 
     int capacity() const noexcept { return cap; }
     int numChannels() const noexcept { return channels; }
+    double sampleRate() const noexcept { return rate; }
     int64_t slotSamples() const noexcept { return slotLen; }
     const MemoryConfig& config() const noexcept { return cfg; }
 
-    int size() const noexcept { return count; }
+    int size() const noexcept { return static_cast<int> (order.size()); }
+    bool full() const noexcept { return size() >= cap; }
     // i-th stored trace, oldest first (0 <= i < size()); returns its slot index.
-    int storedSlot (int i) const noexcept { return fifo[static_cast<size_t> ((head + i) % cap)]; }
+    int storedSlot (int i) const noexcept { return order[static_cast<size_t> (i)]; }
+    int positionOf (int slotIndex) const noexcept; // -1 if not stored
+    int clampedCount() const noexcept;
 
     TraceSlot& slot (int index) noexcept { return slots[static_cast<size_t> (index)]; }
     const TraceSlot& slot (int index) const noexcept { return slots[static_cast<size_t> (index)]; }
 
-    int spareIndex() const noexcept { return spare; }
-    TraceSlot& spareSlot() noexcept { return slot (spare); }
+    int spareIndex (int which = kInputSpare) const noexcept { return spares[which]; }
+    TraceSlot& spareSlot (int which = kInputSpare) noexcept { return slot (spares[which]); }
 
-    // Moves the spare into memory (evicting the oldest trace when full, FIFO)
-    // and returns the slot index it now occupies.
-    int commitSpare() noexcept;
+    uint64_t currentSerial() const noexcept { return nextSerial; }
+
+    // Moves a spare into memory and returns the slot index it now occupies.
+    // Requires !full().
+    int commitSpare (int which = kInputSpare) noexcept;
+
+    // Removes the trace at storage position `position`; its slot becomes free.
+    void removeAt (int position) noexcept;
 
     void clear() noexcept;
+    void clearUnclamped() noexcept;
+
+    // Audio thread. Takes over `old`'s traces (if keepTraces) and its spare
+    // recordings by swapping buffers, so nothing is copied. If this store is
+    // smaller, clamped traces are kept first, then the newest. `old` is left
+    // holding the unused buffers and must outlive any playback that still
+    // reads evicted traces.
+    void adoptFrom (TraceStore& old, bool keepTraces) noexcept;
+
+    // Message thread (before installing): appends a trace with the given audio.
+    // Returns the slot index, or -1 when full.
+    int appendTrace (const TraceSlot& meta, const float* const* audio, int numChannels, int64_t length);
 
 private:
+    void swapBuffers (TraceSlot& a, std::unique_ptr<float[]>& bufA, TraceSlot& b, std::unique_ptr<float[]>& bufB) noexcept;
+
     MemoryConfig cfg;
+    double rate;
     int cap;
     int channels;
     int64_t slotLen;
-    std::unique_ptr<float[]> storage;
+    std::vector<std::unique_ptr<float[]>> buffers; // one per slot
     std::vector<TraceSlot> slots;
-    std::vector<int> fifo;       // ring of stored slot indices
+    std::vector<int> order;      // stored slot indices, oldest first
     std::vector<int> freeSlots;  // stack
-    int head = 0, count = 0;
-    int spare = 0;
+    int spares[kSpares] {};
     uint64_t nextSerial = 1;
 };
 

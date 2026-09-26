@@ -1,0 +1,8 @@
+# Novelty gate: a bar is stored only if memory has nothing very like it.
+# Memory stays small, a catalogue of distinct bars (echo only).
+capacity = 100
+power = 5
+novelty_mode = Store Novel
+novelty_threshold = 0.7
+self_match = off
+dry_level_db = -60

@@ -51,3 +51,14 @@ target_link_libraries(MinervaSpaceEcho
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+# Headless plugin-state test (parameters + embedded memory round trip).
+if(MSE_BUILD_TESTS)
+    add_executable(mse_plugin_state_test tests/StateTest.cpp)
+    target_link_libraries(mse_plugin_state_test PRIVATE MinervaSpaceEcho)
+    # Reuse the plugin's JUCE build (headers and settings) instead of compiling JUCE again.
+    target_include_directories(mse_plugin_state_test PRIVATE $<TARGET_PROPERTY:MinervaSpaceEcho,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(mse_plugin_state_test PRIVATE $<TARGET_PROPERTY:MinervaSpaceEcho,COMPILE_DEFINITIONS>)
+    target_compile_features(mse_plugin_state_test PRIVATE cxx_std_20)
+    add_test(NAME plugin_state_round_trip COMMAND mse_plugin_state_test)
+endif()

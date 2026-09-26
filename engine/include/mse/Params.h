@@ -13,65 +13,96 @@ enum class Similarity { Hintzman, Cosine };
 enum class FeatureMode { Continuous, Ternary };
 enum class NegativeMode { Subtract, Ignore, Absolute };
 enum class Normalization { Sum, Max, Familiarity };
+enum class FullPolicy { Oldest, Random, LeastUsed, Weakest, MergeSimilar, Reject };
+enum class WriteMode { Auto, Manual };
+enum class NoveltyMode { Off, StoreNovel, StoreFamiliar };
+enum class RecordSource { Input, Echo, InputAndEcho };
+
+constexpr float kLevelOffDb = -60.0f;
+constexpr float kGateOffDb = -100.0f;
+constexpr float kCueGateOffDb = kGateOffDb;
 
 // ---- engine parameters (real units) -------------------------------------------
 
 struct EngineParams
 {
+    // timing
     SyncMode syncMode = SyncMode::Tempo;
-    float traceMs = 2000.0f;                        // trace length when syncMode == Free
+    float traceMs = 2000.0f;                           // trace length when syncMode == Free
     TraceDivision traceDivision = TraceDivision::Bar1; // trace length when syncMode == Tempo
-    int capacity = 100;                             // structural: applied via MemoryConfig, not per block
 
-    float power = 3.0f;                             // activation = sign(S) * |S|^power
+    // memory (capacity and budget are structural: applied via MemoryConfig)
+    int capacity = 100;
+    int memoryBudgetIndex = 3;                         // see memoryBudgetBytes()
+    FullPolicy fullPolicy = FullPolicy::Oldest;
+    float mergeThreshold = 1.0f;                       // merge into a trace at least this similar (1 = off)
+    bool freeze = false;                               // no writes, no decay
+
+    // writing (encoding gate)
+    WriteMode writeMode = WriteMode::Auto;
+    bool capture = false;                              // rising edge arms a capture of the current segment
+    float writeGateDb = -70.0f;                        // quieter segments are not stored
+    NoveltyMode noveltyMode = NoveltyMode::Off;
+    float noveltyThreshold = 0.9f;                     // compared with the best similarity to memory
+    float writeProbability = 1.0f;
+    RecordSource recordSource = RecordSource::Input;
+
+    // clamping
+    bool clampIncoming = false;
+    float clampBudget = 0.5f;                          // max fraction of capacity that may be clamped
+    bool clampProtects = true;                         // clamped traces don't decay
+
+    // forgetting
+    float encodingFailure = 0.0f;                      // Lf: probability each stored feature is lost
+    float contentDropout = 0.0f;                       // probability each 1/32 of a stored trace drops out
+    float decayForget = 0.0f;                          // per segment: probability each feature is forgotten
+    float decayFadeDb = 0.0f;                          // per segment: strength lost
+    float wearTone = 0.0f;                             // older traces play back duller
+
+    // retrieval
+    float power = 3.0f;
     Similarity similarity = Similarity::Hintzman;
     FeatureMode featureMode = FeatureMode::Continuous;
     float ternaryThreshold = 0.5f;
-    float encodingFailure = 0.0f;                   // Lf: probability each stored feature is lost
-    bool selfMatch = true;                          // may the just-stored trace answer its own cue?
-    float cueGateDb = -60.0f;                       // quieter segments don't cue memory (<= kCueGateOffDb: off)
+    bool selfMatch = true;
+    float cueGateDb = -60.0f;
     NegativeMode negativeMode = NegativeMode::Subtract;
     Normalization normalization = Normalization::Sum;
-    float levelTracking = 1.0f;                     // 1: echo level follows the cue's level; 0: memories at their own level
+    float levelTracking = 1.0f;
 
-    float feedback = 0.0f;                          // echo -> record path
-    float echoLevelDb = 0.0f;                       // <= kLevelOffDb means off
+    // output
+    float feedback = 0.0f;
+    float echoLevelDb = 0.0f;
     float dryLevelDb = 0.0f;
     float edgeFadeMs = 5.0f;
     float outputGainDb = 0.0f;
+
+    // plugin only
+    bool embedMemory = false;
+
+    bool operator== (const EngineParams&) const = default;
 };
 
-constexpr float kLevelOffDb = -60.0f;
-constexpr float kCueGateOffDb = -100.0f;
+double memoryBudgetBytes (int budgetIndex);
 
 // ---- parameter table ----------------------------------------------------------
 // Single source of truth for parameter IDs, ranges and defaults. The plugin
 // builds its host parameters from it and the offline renderer parses presets
-// with it, so both always agree.
+// with it, so both always agree. Order here is the order shown in the plugin.
 
 enum class ParamType { Float, Int, Bool, Choice };
 
 enum ParamIndex
 {
-    kSyncMode,
-    kTraceMs,
-    kTraceDivision,
-    kCapacity,
-    kPower,
-    kSimilarity,
-    kFeatureMode,
-    kTernaryThreshold,
-    kEncodingFailure,
-    kSelfMatch,
-    kCueGateDb,
-    kNegativeMode,
-    kNormalization,
-    kLevelTracking,
-    kFeedback,
-    kEchoLevelDb,
-    kDryLevelDb,
-    kEdgeFadeMs,
-    kOutputGainDb,
+    kSyncMode, kTraceMs, kTraceDivision,
+    kCapacity, kMemoryBudget, kFullPolicy, kMergeThreshold, kFreeze,
+    kWriteMode, kCapture, kWriteGateDb, kNoveltyMode, kNoveltyThreshold, kWriteProbability, kRecordSource,
+    kClampIncoming, kClampBudget, kClampProtects,
+    kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
+    kPower, kSimilarity, kFeatureMode, kTernaryThreshold, kSelfMatch, kCueGateDb, kNegativeMode,
+    kNormalization, kLevelTracking,
+    kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,
+    kEmbedMemory,
     kNumParams
 };
 

@@ -14,7 +14,7 @@ using namespace mse;
 
 namespace {
 
-FeatureVector analyse (const tools::AudioBuffer& b, FeatureMode mode = FeatureMode::Continuous, bool* loud = nullptr)
+FeatureVector analyse (const AudioBuffer& b, FeatureMode mode = FeatureMode::Continuous, bool* loud = nullptr)
 {
     FeatureExtractor fx;
     fx.prepare (b.sampleRate);
@@ -198,18 +198,28 @@ TEST_CASE ("Retrieval normalisation modes")
     }
 }
 
-TEST_CASE ("TraceStore evicts FIFO and recycles the evicted slot as the spare")
+TEST_CASE ("TraceStore commits spares without copying and recycles removed slots")
 {
     MemoryConfig cfg { 2, 1.0e8, 0.01 };
     TraceStore store (cfg, 48000.0, 2);
+    const int spare = store.spareIndex();
     const int s0 = store.commitSpare();
+    REQUIRE (s0 == spare);
     const int s1 = store.commitSpare();
-    REQUIRE (store.size() == 2);
-    const int s2 = store.commitSpare();
-    REQUIRE (store.size() == 2);
+    REQUIRE (store.full());
+    REQUIRE (store.commitSpare() == -1); // full: the caller must choose a victim first
+
+    store.removeAt (0); // evict the oldest
+    REQUIRE (store.size() == 1);
     REQUIRE (store.storedSlot (0) == s1);
+    const int s2 = store.commitSpare();
     REQUIRE (store.storedSlot (1) == s2);
-    REQUIRE (store.spareIndex() == s0);
+    REQUIRE (store.spareIndex() == s0); // the evicted slot is recycled as the new spare
+
+    store.slot (s1).clamped = true;
+    store.clearUnclamped();
+    REQUIRE (store.size() == 1);
+    REQUIRE (store.storedSlot (0) == s1);
     store.clear();
     REQUIRE (store.size() == 0);
 }
@@ -218,6 +228,36 @@ TEST_CASE ("TraceStore slot length respects the memory budget")
 {
     MemoryConfig cfg { 1000, 1.0e9, 20.0 };
     TraceStore store (cfg, 48000.0, 2);
-    // 1 GB / (1001 slots * 2 ch * 4 bytes) = ~124875 samples = ~2.6 s
-    REQUIRE (store.slotSamples() == 124875);
+    // 1 GB / (1002 slots * 2 ch * 4 bytes) = ~124750 samples = ~2.6 s
+    REQUIRE (store.slotSamples() == 124750);
+}
+
+TEST_CASE ("TraceStore adoption moves traces (clamped first, then newest) without copying audio")
+{
+    MemoryConfig big { 6, 1.0e8, 0.01 };
+    TraceStore old (big, 48000.0, 1);
+    std::vector<const float*> buffers;
+    for (int i = 0; i < 6; ++i)
+    {
+        auto& s = old.spareSlot();
+        s.audio[0][0] = static_cast<float> (i);
+        s.end = 1;
+        s.clamped = (i == 0);
+        buffers.push_back (s.audio[0]);
+        old.commitSpare();
+    }
+
+    MemoryConfig small { 3, 1.0e8, 0.01 };
+    TraceStore fresh (small, 48000.0, 1);
+    fresh.adoptFrom (old, true);
+    REQUIRE (fresh.size() == 3);
+    // Kept: trace 0 (clamped) and the two newest (4, 5), in chronological order.
+    const float expected[] = { 0.0f, 4.0f, 5.0f };
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto& s = fresh.slot (fresh.storedSlot (i));
+        REQUIRE (s.audio[0][0] == expected[i]);
+        REQUIRE (s.audio[0] == buffers[static_cast<size_t> (expected[i])]); // same buffer: moved, not copied
+    }
+    REQUIRE (fresh.slot (fresh.storedSlot (0)).clamped);
 }

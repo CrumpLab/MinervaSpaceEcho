@@ -1,0 +1,6 @@
+# Record Source = Echo: after the first bar, memory stores what it plays back
+# rather than what you play, so it keeps retelling its first memory (echo only).
+capacity = 8
+power = 3
+record_source = Echo
+dry_level_db = -60

@@ -1,0 +1,6 @@
+# 3-trace memory that consolidates instead of forgetting: each new bar is
+# averaged into the most similar trace, so prototypes form (echo only).
+capacity = 3
+full_policy = Merge Similar
+power = 3
+dry_level_db = -60

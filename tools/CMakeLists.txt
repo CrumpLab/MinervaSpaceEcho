@@ -1,6 +1,5 @@
 # Shared helpers (WAV I/O, presets) and the deterministic test-signal library.
 add_library(mse_tools_common STATIC
-    common/Wav.cpp
     common/Preset.cpp
     testgen/TestSignals.cpp
 )

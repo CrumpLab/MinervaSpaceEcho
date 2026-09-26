@@ -1,4 +1,4 @@
-#include "Wav.h"
+#include "mse/Wav.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 
-namespace mse::tools {
+namespace mse {
 
 namespace {
 
@@ -201,4 +201,4 @@ void writeWav (const std::string& path, const AudioBuffer& audio, WavFormat fmt)
         throw std::runtime_error ("write failed: " + path);
 }
 
-} // namespace mse::tools
+} // namespace mse

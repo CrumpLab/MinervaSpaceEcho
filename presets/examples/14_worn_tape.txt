@@ -1,0 +1,10 @@
+# Forgetting over time: traces fade, lose features and dull with age,
+# with tape dropouts at recording (echo only).
+capacity = 100
+power = 3
+self_match = off
+decay_fade_db = 1.5
+decay_forget = 0.05
+wear_tone = 0.8
+content_dropout = 0.15
+dry_level_db = -60

@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace mse::tools {
+namespace mse {
 
 // Planar audio buffer: channels[c][i].
 struct AudioBuffer
@@ -28,4 +28,4 @@ AudioBuffer readWav (const std::string& path);
 // Throws std::runtime_error on failure.
 void writeWav (const std::string& path, const AudioBuffer& audio, WavFormat format = WavFormat::Float32);
 
-} // namespace mse::tools
+} // namespace mse

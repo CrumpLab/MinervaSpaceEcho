@@ -42,9 +42,14 @@ public:
     // Thread-safe accessors for the editor.
     mse::HostClock getClockForUi() const noexcept;
     mse::EngineStats getStats() const noexcept { return engine.getStats(); }
-    void clearMemory() noexcept { engine.requestClear(); }
+    void sendCommand (mse::Command c) noexcept { engine.sendCommand (c); }
 
-    static constexpr int kStateVersion = 2;
+    // Message thread. Save writes on a background thread; `done` is called on
+    // the message thread with an empty string on success, or an error.
+    void saveMemory (const juce::File& folder, std::function<void (juce::String)> done);
+    juce::String loadMemory (const juce::File& folderOrManifest); // empty on success
+
+    static constexpr int kStateVersion = 3;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

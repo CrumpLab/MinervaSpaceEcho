@@ -1,13 +1,14 @@
 // mse-render: runs a WAV file through the engine offline, block by block,
 // exactly as a host would, with a synthesised host clock.
 #include "Preset.h"
-#include "Wav.h"
+#include "mse/Wav.h"
 
 #include "mse/EchoEngine.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,9 @@ void usage()
         "  --free            no host tempo (free-running clock)\n"
         "  --block <n>       block size in samples (default 512)\n"
         "  --tail <sec>      append this much silence to hear echo tails (default 0)\n"
-        "  --seed <n>        random seed for encoding failure (default 1)\n"
+        "  --seed <n>        random seed for encoding failure etc. (default 1)\n"
+        "  --load-memory <dir>  start with a saved memory (Save Memory folder)\n"
+        "  --save-memory <dir>  save the memory at the end of the render\n"
         "  --pcm24           write 24-bit PCM instead of 32-bit float\n"
         "parameters (--set id=value):\n%s", mse::tools::describeParams().c_str());
 }
@@ -33,12 +36,14 @@ void usage()
 int main (int argc, char** argv)
 {
     std::vector<std::string> positional, assignments;
+    std::vector<mse::tools::TimedAssignment> timed;
     std::string presetPath;
     double bpm = 120.0, tailSeconds = 0.0;
     bool freeRunning = false;
     int blockSize = 512;
     uint64_t seed = 1;
-    auto format = mse::tools::WavFormat::Float32;
+    std::string loadMemoryDir, saveMemoryDir;
+    auto format = mse::WavFormat::Float32;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -58,7 +63,9 @@ int main (int argc, char** argv)
         else if (a == "--block") blockSize = std::stoi (next());
         else if (a == "--tail") tailSeconds = std::stod (next());
         else if (a == "--seed") seed = std::stoull (next());
-        else if (a == "--pcm24") format = mse::tools::WavFormat::Pcm24;
+        else if (a == "--load-memory") loadMemoryDir = next();
+        else if (a == "--save-memory") saveMemoryDir = next();
+        else if (a == "--pcm24") format = mse::WavFormat::Pcm24;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (! a.empty() && a[0] == '-') { std::fprintf (stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
         else positional.push_back (a);
@@ -74,12 +81,12 @@ int main (int argc, char** argv)
     {
         auto values = mse::defaultParamValues();
         if (! presetPath.empty())
-            mse::tools::applyPresetFile (values, presetPath);
+            mse::tools::applyPresetFile (values, presetPath, &timed);
         for (const auto& s : assignments)
             mse::tools::applyAssignment (values, s);
         const auto params = mse::paramsFromValues (values);
 
-        auto audio = mse::tools::readWav (positional[0]);
+        auto audio = mse::readWav (positional[0]);
         const int numCh = std::min (audio.numChannels(), mse::EchoEngine::kMaxChannels);
         audio.channels.resize (static_cast<size_t> (numCh));
         const int tail = static_cast<int> (tailSeconds * audio.sampleRate);
@@ -89,7 +96,10 @@ int main (int argc, char** argv)
         mse::EchoEngine engine;
         mse::MemoryConfig memory;
         memory.capacity = params.capacity;
+        memory.budgetBytes = mse::memoryBudgetBytes (params.memoryBudgetIndex);
         engine.setMemoryConfig (memory);
+        if (! loadMemoryDir.empty())
+            engine.loadSnapshot (mse::readMemoryFolder (loadMemoryDir));
         engine.setSeed (seed);
         engine.setParams (params);
         engine.prepare (audio.sampleRate, blockSize, numCh);
@@ -101,8 +111,27 @@ int main (int argc, char** argv)
 
         std::vector<float*> ptrs (static_cast<size_t> (numCh));
         const int total = audio.numSamples();
+        const double samplesPerBar = 4.0 * 60.0 / bpm * audio.sampleRate;
+        std::stable_sort (timed.begin(), timed.end(), [] (const auto& a, const auto& b) { return a.bar < b.bar; });
+        size_t nextTimed = 0;
         for (int pos = 0; pos < total; pos += blockSize)
         {
+            // Timed preset lines take effect at the first block at or after their bar.
+            bool changed = false;
+            while (nextTimed < timed.size() && timed[nextTimed].bar * samplesPerBar <= pos)
+            {
+                const auto& t = timed[nextTimed++];
+                if (t.key == "command")
+                    engine.sendCommand (mse::tools::parseCommand (t.value));
+                else
+                {
+                    mse::tools::applyParam (values, t.key, t.value);
+                    changed = true;
+                }
+            }
+            if (changed)
+                engine.setParams (mse::paramsFromValues (values));
+
             const int n = std::min (blockSize, total - pos);
             for (int c = 0; c < numCh; ++c)
                 ptrs[static_cast<size_t> (c)] = audio.channels[static_cast<size_t> (c)].data() + pos;
@@ -110,7 +139,18 @@ int main (int argc, char** argv)
             engine.process (ptrs.data(), numCh, n, clock);
         }
 
-        mse::tools::writeWav (positional[1], audio, format);
+        mse::writeWav (positional[1], audio, format);
+        if (! saveMemoryDir.empty())
+        {
+            mse::MemorySnapshot snap;
+            if (! engine.takeSnapshot (snap))
+                throw std::runtime_error ("could not snapshot memory");
+            const auto& specs = mse::paramSpecs();
+            for (size_t i = 0; i < specs.size(); ++i)
+                snap.params.emplace_back (specs[i].id, values[i]);
+            mse::writeMemoryFolder (snap, saveMemoryDir);
+            std::printf ("saved %zu traces to %s\n", snap.traces.size(), saveMemoryDir.c_str());
+        }
         const auto st = engine.getStats();
         std::printf ("rendered %s -> %s (%.2f s, %d ch, engine %s)\n"
                      "  memory %d/%d traces, %llu stored, trace %.3f s, last echo: %d traces, intensity %.3f\n",

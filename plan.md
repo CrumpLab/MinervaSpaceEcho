@@ -417,6 +417,17 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Memory budget and derived capacity; safe resizing.
 - Save Memory / Load Memory (WAV per trace + JSON manifest); optional
   embed-in-Live-set, off by default.
+- **Status:** implemented; awaiting a listen in Live.
+  - Resizing moves trace buffers between stores instead of copying audio. The
+    echo continues through a resize, and the old store lingers for two
+    boundaries so anything still playing stays valid.
+  - Snapshots are taken without stopping audio: writes pause briefly and a
+    seqlock guarantees a consistent copy. The same snapshot feeds Save Memory,
+    Save Memory With Set, and `mse-render --save-memory`.
+  - Decay scales a trace's *activation* (strength), not its audio. Faded
+    memories answer less, and level tracking keeps the echo at the cue's level.
+  - Everything runs under AddressSanitizer/UBSan in the test suite, and a
+    headless plugin test checks parameter and embedded-memory state round trips.
 
 ### Stage 3: Live cueing
 - Mode B, progressive prefix cue with smoothed, crossfaded activation updates.

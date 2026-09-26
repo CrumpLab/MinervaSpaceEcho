@@ -84,7 +84,19 @@ void applyAssignment (ParamValues& values, const std::string& assignment)
     applyParam (values, trim (assignment.substr (0, eq)), assignment.substr (eq + 1));
 }
 
-void applyPresetFile (ParamValues& values, const std::string& path)
+Command parseCommand (const std::string& raw)
+{
+    const std::string name = lower (trim (raw));
+    if (name == "capture") return Command::Capture;
+    if (name == "clamp_last") return Command::ClampLast;
+    if (name == "clamp_all") return Command::ClampAll;
+    if (name == "unclamp_all") return Command::UnclampAll;
+    if (name == "clear_unclamped") return Command::ClearUnclamped;
+    if (name == "clear_all") return Command::ClearAll;
+    throw std::runtime_error ("unknown command: " + raw);
+}
+
+void applyPresetFile (ParamValues& values, const std::string& path, std::vector<TimedAssignment>* timed)
 {
     std::ifstream in (path);
     if (! in)
@@ -102,7 +114,31 @@ void applyPresetFile (ParamValues& values, const std::string& path)
             continue;
         try
         {
-            applyAssignment (values, line);
+            if (line[0] == '@')
+            {
+                if (timed == nullptr)
+                    throw std::runtime_error ("timed lines are not supported here");
+                const auto space = line.find_first_of (" \t");
+                const auto eq = line.find ('=');
+                if (space == std::string::npos || eq == std::string::npos || eq < space)
+                    throw std::runtime_error ("expected '@<bar> key = value'");
+                TimedAssignment t;
+                t.bar = std::stod (line.substr (1, space - 1));
+                t.key = trim (line.substr (space, eq - space));
+                t.value = trim (line.substr (eq + 1));
+                if (t.key == "command")
+                    parseCommand (t.value);
+                else
+                {
+                    auto scratch = values;
+                    applyParam (scratch, t.key, t.value); // validate now
+                }
+                timed->push_back (t);
+            }
+            else
+            {
+                applyAssignment (values, line);
+            }
         }
         catch (const std::exception& e)
         {

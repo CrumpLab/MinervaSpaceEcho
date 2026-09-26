@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wav.h"
+#include "mse/Wav.h"
 
 #include <cstdint>
 #include <string>
@@ -22,15 +22,15 @@ struct Clip
 {
     std::string name;         // file stem, e.g. "drums"
     std::string description;
-    tools::AudioBuffer audio;
+    AudioBuffer audio;
 };
 
-tools::AudioBuffer drums (const Options& o);        // groove with fills every 4 bars
-tools::AudioBuffer chordsBass (const Options& o);   // Am-F-C-G pad + bass line
-tools::AudioBuffer melody (const Options& o);       // 1-bar motif with occasional variations
-tools::AudioBuffer impulses (const Options& o);     // single-sample clicks on every beat
-tools::AudioBuffer styleChange (const Options& o);  // style A for half, then style B
-tools::AudioBuffer fullMix (const Options& o);      // drums + chords/bass + melody
+AudioBuffer drums (const Options& o);        // groove with fills every 4 bars
+AudioBuffer chordsBass (const Options& o);   // Am-F-C-G pad + bass line
+AudioBuffer melody (const Options& o);       // 1-bar motif with occasional variations
+AudioBuffer impulses (const Options& o);     // single-sample clicks on every beat
+AudioBuffer styleChange (const Options& o);  // style A for half, then style B
+AudioBuffer fullMix (const Options& o);      // drums + chords/bass + melody
 
 std::vector<Clip> generateAll (const Options& o);
 

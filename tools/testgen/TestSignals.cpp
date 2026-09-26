@@ -6,7 +6,7 @@
 
 namespace mse::testgen {
 
-using tools::AudioBuffer;
+using mse::AudioBuffer;
 
 namespace {
 
