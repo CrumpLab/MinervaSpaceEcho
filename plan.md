@@ -3,8 +3,8 @@
 An experimental audio effect plugin (AU + VST3, macOS, for Ableton Live) that
 treats Hintzman's MINERVA II multiple-trace memory model as a tape echo.
 
-> **Status:** draft for review. Decisions that need your input are marked **[DECIDE]**
-> and are collected at the end.
+> **Status:** reviewed. Decisions are recorded in §9. Licence: open source (AGPLv3,
+> following JUCE's open-source licence).
 
 ---
 
@@ -133,8 +133,13 @@ Content storage dominates. Stereo float at 48 kHz is about 384 KB/s.
 | 20 s | 32 | ~246 MB |
 | 250 ms | 512 | ~49 MB |
 
-Plan: a configurable **memory budget** (default 256 MB). Capacity is derived as
-`min(max traces, budget / trace size)`. All memory is preallocated when
+**Defaults: trace length = 1 bar at 120 BPM (2 s), capacity = 100 traces**
+(≈77 MB at 48 kHz).
+
+Plan: a configurable **memory budget** (default 1 GB). Capacity is derived as
+`min(max traces, budget / trace size)`. For example, 100 × 4 bars @120 ≈ 307 MB
+fits, but 100 × 20 s ≈ 768 MB only fits under a larger budget. When the budget
+limits capacity, the UI shows the **effective capacity**. All memory is preallocated when
 settings change, never on the audio thread. Storing content as int16 is an
 optional later optimization that halves RAM.
 
@@ -253,13 +258,19 @@ activation set changes.
   (average) instead of adding. Prototypes emerge, a sort of schema formation.
 - **Reject**: stop storing when full.
 
-### 5.3 Locking ("clamping")
-- **Lock individual traces** so they are never overwritten or decayed (pin a
-  good bar).
-- **Lock all**: equivalent to Freeze.
-- **Clear** memory; **clear unlocked** only.
-- **[DECIDE]** Did "clamp" also mean capping values, e.g. limiting how strongly
-  any one trace can dominate (activation ceiling)? Easy to add as an option.
+### 5.3 Clamping (locking traces)
+"Clamp" = lock a trace in so no full-memory policy can replace it.
+- **Clamp individual traces** (pin a good bar). Clamped traces are skipped by
+  every replacement policy in §5.2. Optionally they are also exempt from decay
+  (a per-trace "exempt from decay" setting).
+- **Clamp next capture**: the next stored trace is clamped automatically.
+- **Clamp all**: equivalent to Freeze.
+- **Clear** memory; **clear unclamped** only.
+- If every slot is clamped and memory is full, new traces are rejected.
+- **Clamp budget**: optional limit on how many traces may be clamped (e.g.
+  25 % of capacity), so memory keeps some room to change.
+- *Experimental, later:* an **activation ceiling**, capping how strongly any one
+  trace can dominate the echo.
 
 ### 5.4 Forgetting
 - **`Lf` at encoding**: each feature is zeroed with probability `Lf`.
@@ -278,8 +289,19 @@ activation set changes.
 
 ### 5.6 Persistence
 - Parameters are saved with the Live set (standard).
-- Optional: save **memory contents** with the set, or to disk as an audio file
-  plus metadata. A set reopens remembering.
+- Memory contents are **not** saved with the Live set by default.
+- **Save Memory / Load Memory**: write the whole model to a file on disk and
+  reload it later:
+  - trace audio
+  - features
+  - per-trace metadata: clamp state, age, use count, decay state, source
+    tempo and length
+  - model parameters
+  
+  Format: a folder or zip bundle with a WAV per trace plus a JSON manifest, so
+  it is inspectable and editable outside the plugin.
+- Option: **embed memory in the Live set** (off by default; can make sets
+  large).
 - Optional: **preload memory from audio files** (drop a folder of loops to
   seed the memory).
 
@@ -317,7 +339,8 @@ MinervaSpaceEcho/
 ```
 
 - **Framework:** JUCE (CMake) builds AU and VST3 plus a Standalone app for
-  quick testing. **[DECIDE]**
+  quick testing. The project is open source under **AGPLv3**, as JUCE's
+  open-source licence requires.
 - **Engine separate from JUCE:** I can build, test, and render audio examples
   inside my Linux dev container. You audition WAVs before anything goes into
   Live, and the same code ships in the plugin.
@@ -338,13 +361,20 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 ### Stage 0: Scaffolding
 - Repo layout, CMake, JUCE via FetchContent, engine library, test framework.
 - Offline render CLI (WAV in/out, parameters from a JSON preset).
+- **Test-audio generator** (deterministic, seeded; nothing copyrighted):
+  - synthetic drum loops, including variations and fills
+  - chord progressions and a bass line at 120 BPM
+  - a melody that repeats with occasional changes (to test recognition)
+  - noise bursts and impulses (for timing / delay-accuracy checks)
+  - a sudden style change mid-file (to test novelty and forgetting)
+- LICENSE (AGPLv3), README.
 - Plugin that loads in Live and passes audio through. Generic parameter UI.
 - CI: macOS universal AU/VST3 build + pluginval; Linux engine tests.
 - **Done when:** you load the pass-through plugin in Live from a CI build.
 
 ### Stage 1: Tape = Memory (segment cue, blend)
 - Clock: free (ms) and host-synced (beats/bars) segmenting.
-- Trace store: capacity setting, FIFO, preallocated.
+- Trace store: capacity setting (default 100), FIFO, preallocated.
 - Features: K×B band energies, normalization, optional ternarize.
 - Retrieval: Hintzman similarity, POWER, self-match on/off, negative-activation
   mode, normalization modes.
@@ -359,13 +389,21 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Write gates: level, novelty, familiarity, probability, manual capture,
   freeze.
 - Full policies: FIFO, random, least-used, weakest, consolidate, reject.
-- Trace locking; clear / clear unlocked.
+- Clamping (locking traces), clamp next capture, clamp budget; clear / clear
+  unclamped.
 - Content dropout (slot/band), decay over time, generation loss.
 - Echo re-encoding (store echoes as traces).
 - Memory budget and derived capacity; safe resizing.
-- Save parameters in the Live set; optionally save memory contents too.
+- Save Memory / Load Memory (WAV per trace + JSON manifest); optional
+  embed-in-Live-set, off by default.
 
-### Stage 3: Heads and chorus
+### Stage 3: Live cueing
+- Mode B, progressive prefix cue with smoothed, crossfaded activation updates.
+- Prediction head (look ahead `Δ` into matching traces).
+- Mode C, rolling-window sliding search on a worker thread (unclocked).
+- CPU profiling; SIMD for similarity if needed.
+
+### Stage 4: Heads and chorus
 - Top-k voices with pan spread / detune / micro-delay.
 - Multiple heads: delay heads, iterative-recall heads, per-head level/pan.
 - RE-201-style mode selector (preset head combinations).
@@ -374,12 +412,6 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
   filter or feedback).
 - Recency weighting; feature masks (rhythm-only / timbre-only).
 - Sidechain as alternative cue source; random/frozen probe.
-
-### Stage 4: Live cueing
-- Mode B, progressive prefix cue with smoothed, crossfaded activation updates.
-- Prediction head (look ahead `Δ` into matching traces).
-- Mode C, rolling-window sliding search on a worker thread (unclocked).
-- CPU profiling; SIMD for similarity if needed.
 
 ### Stage 5: Tape character
 - Varispeed playback for length mismatch (pitch follows tape speed).
@@ -406,18 +438,14 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 
 ---
 
-## 9. Open decisions for you
+## 9. Decisions
 
-1. **[DECIDE] Framework:** JUCE + CMake (recommended)?
-2. **[DECIDE] Stage 1 cue mode:** start with Mode A (segment cue, delay-like),
-   with Mode B in Stage 4? Or pull progressive cueing earlier?
-3. **[DECIDE] "Clamp":** trace locking only, or also an activation ceiling /
-   other value clamping?
-4. **[DECIDE] Default trace length and capacity:** e.g. 1 bar, 32 traces?
-5. **[DECIDE] Test audio:** do you have loops or recordings you'd like the
-   offline renders to use, or should I generate test material (synthetic drums,
-   chords)?
-6. **[DECIDE] Memory persistence:** should memory contents be saved with the
-   Live set by default (can make sets large)?
-7. **[DECIDE] Licensing:** open source (JUCE AGPL) or keep private (JUCE
-   Starter licence)?
+| # | Question | Decision |
+|---|---|---|
+| 1 | Framework | **JUCE + CMake** |
+| 2 | Stage 1 cue mode | **Mode A (segment cue)** first. It is the simplest correct version of the model and gives the "capacity 1 = delay" test. Live cueing (Modes B/C) is moved up to **Stage 3**, ahead of heads/chorus, since real-time cueing is the most interesting open question. |
+| 3 | "Clamp" | **Lock traces so they can't be replaced** when memory is full (§5.3). Activation ceiling is a later experimental option. |
+| 4 | Defaults | **1 bar @ 120 BPM (2 s), 100 traces**; 1 GB memory budget (§2.5) |
+| 5 | Test audio | **Generated** by a deterministic test-signal tool (Stage 0) |
+| 6 | Memory persistence | **Not saved with the Live set by default.** Explicit Save/Load Memory to file; optional embed (§5.6). |
+| 7 | Licence | **Open source, AGPLv3** |
