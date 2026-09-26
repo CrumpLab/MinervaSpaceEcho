@@ -18,6 +18,14 @@ enum class WriteMode { Auto, Manual };
 enum class NoveltyMode { Off, StoreNovel, StoreFamiliar };
 enum class RecordSource { Input, Echo, InputAndEcho };
 enum class CueMode { Segment, Progressive, Rolling };
+enum class HeadMode { Off, Delay, Iterative };
+enum class Playback { Blend, Voices, Sample };
+enum class CueSource { Input, Sidechain, Random, Frozen };
+enum class FeatureFocus { Full, Rhythm, Timbre };
+
+// RE-201-style head combinations. Custom uses the per-head settings.
+enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
+constexpr int kNumHeads = 3;
 
 constexpr float kLevelOffDb = -60.0f;
 constexpr float kGateOffDb = -100.0f;
@@ -67,6 +75,27 @@ struct EngineParams
     float rollingIntervalMs = 100.0f;                  // Rolling: how often memory is searched
     float lookaheadMs = 0.0f;                          // play memory this far ahead (prediction)
     float cueSmoothingMs = 40.0f;                      // crossfade when a live cue changes the echo
+    CueSource cueSource = CueSource::Input;
+    FeatureFocus featureFocus = FeatureFocus::Full;
+    float recency = 0.0f;                              // favour recently stored traces
+
+    // heads (plan §4.3)
+    ModeSelector modeSelector = ModeSelector::Custom;
+    float headLevelDb[kNumHeads] = { 0.0f, -6.0f, -9.0f };
+    float headPan[kNumHeads] = { 0.0f, -0.5f, 0.5f };
+    HeadMode headMode[kNumHeads] = { HeadMode::Delay, HeadMode::Off, HeadMode::Off }; // head 1: always the main echo
+
+    // playback (plan §4.2, §4.4)
+    Playback playback = Playback::Blend;
+    int voices = 4;
+    float voiceSpread = 0.7f;
+    float voiceDetuneCents = 8.0f;
+    float voiceDelayMs = 12.0f;
+
+    // echo tone and familiarity modulation
+    float echoToneHz = 20000.0f;                       // echo low-pass (20 kHz = off)
+    float intensityToTone = 0.0f;                      // familiar echoes brighter (+) or darker (-)
+    float intensityToFeedback = 0.0f;                  // familiar echoes feed back more (+) or less (-)
 
     // retrieval
     float power = 3.0f;
@@ -109,6 +138,10 @@ enum ParamIndex
     kClampIncoming, kClampBudget, kClampProtects,
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
     kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
+    kCueSource, kFeatureFocus, kRecency,
+    kModeSelector, kHead1LevelDb, kHead1Pan, kHead2Mode, kHead2LevelDb, kHead2Pan, kHead3Mode, kHead3LevelDb, kHead3Pan,
+    kPlayback, kVoices, kVoiceSpread, kVoiceDetune, kVoiceDelayMs,
+    kEchoToneHz, kIntensityToTone, kIntensityToFeedback,
     kPower, kSimilarity, kFeatureMode, kTernaryThreshold, kSelfMatch, kCueGateDb, kNegativeMode,
     kNormalization, kLevelTracking,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,

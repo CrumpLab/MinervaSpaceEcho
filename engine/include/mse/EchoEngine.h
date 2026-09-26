@@ -107,7 +107,9 @@ public:
     // ---- audio thread ----
     void setParams (const EngineParams& p) noexcept { params = p; }
     const EngineParams& getParams() const noexcept { return params; }
-    void process (float* const* channels, int numChannels, int numSamples, const HostClock& clock) noexcept;
+    // `sidechain` (optional) cues memory when Cue Source = Sidechain.
+    void process (float* const* channels, int numChannels, int numSamples, const HostClock& clock,
+                  const float* const* sidechain = nullptr, int sidechainChannels = 0) noexcept;
 
     double getSampleRate() const noexcept { return sampleRate; }
     const HostClock& getLastClock() const noexcept { return lastClock; }
@@ -117,11 +119,14 @@ private:
     {
         const float* audio[2];
         int64_t begin, end;
-        int64_t offset;    // read position = playlist pos + offset
+        int64_t offset;    // read position = playlist pos + offset (at rate 1)
         float weight;
         int slot;
         float toneCoeff;   // wear-tone one-pole coefficient (1 = bypass)
         float z[2];
+        float gain[2];     // per output channel: weight x tracking x head level x pan
+        double rate;       // playback speed (voices detune); 1 = exact
+        int64_t anchor;    // playlist pos where varispeed reading started
     };
     struct Playlist
     {
@@ -135,6 +140,7 @@ private:
 
     // audio thread helpers
     void resetPlayback() noexcept;
+    void clearHeads() noexcept;
     void adoptPendingStore() noexcept;
     void processCommands() noexcept;
     double nominalLength (const HostClock& clock) const noexcept;
@@ -144,7 +150,17 @@ private:
                              int64_t recorded, int generation, bool forced, int& outSlot) noexcept;
     RetrievalSettings retrievalSettings() const noexcept;
     void noteUse (const RetrievalResult& result) noexcept;
-    void installEcho (const RetrievalResult& result, float cueRms, int64_t pos, int64_t fadeOutLen, int64_t fadeInLen) noexcept;
+    // Installs weights[0..n) on a head, shaped by the playback mode.
+    void installEcho (int head, const EchoWeight* w, int n, float tracking, int64_t pos, int64_t fadeOutLen,
+                      int64_t fadeInLen) noexcept;
+    // Head 1's echo: tracking from the cue level, stats, familiarity.
+    void installMain (const RetrievalResult& result, float cueRms, int64_t pos, int64_t fadeOutLen, int64_t fadeInLen) noexcept;
+    float trackingFor (const EchoWeight* w, int n, float cueRms) const noexcept;
+    void updateOtherHeads (float tracking, int64_t pos) noexcept;
+    int shapePlayback (EchoWeight* w, int n) noexcept; // returns new count
+    void effectiveHeads (HeadMode modes[kNumHeads], float gains[kNumHeads]) const noexcept;
+    FeatureExtractor& cueFx() noexcept { return sidechainActive ? scFeatures : features; }
+    bool makeCue (FeatureVector& out, float& cueRms, int64_t recorded) noexcept;
     int64_t slotEdge (int k) const noexcept;
     void progressiveUpdate (int k) noexcept;
     void startRollingSearch() noexcept;
@@ -156,8 +172,8 @@ private:
     void applyDecay() noexcept;
     int maxClamped() const noexcept;
     void dropMissingEntries (Playlist& pl) noexcept;
-    void processChunk (float* const* io, int ioChannels, int offset, int len) noexcept;
-    void accumulate (Playlist& pl, int ioChannels, int len) noexcept;
+    void processChunk (float* const* io, int ioChannels, int offset, int len, const float* const* sc, int scChannels) noexcept;
+    void accumulate (Playlist& pl, int head, int ioChannels, int blockOffset, int len) noexcept;
     void stepLingering() noexcept;
     void beginMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_acq_rel); }
     void endMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_release); }
@@ -198,8 +214,33 @@ private:
     std::array<std::atomic<int>, kQueueSize> commandQueue {};
     std::atomic<uint32_t> queueHead { 0 }, queueTail { 0 };
 
-    FeatureExtractor features, echoFeatures;
-    FeatureVector probe {}, echoProbe {}, partialProbe {};
+    FeatureExtractor features, echoFeatures, scFeatures;
+    FeatureVector probe {}, echoProbe {}, partialProbe {}, cue {}, frozenCue {};
+    float frozenCueRms = 0.0f;
+    bool sidechainActive = false;
+    double cueSegEnergy = 0.0;               // energy of the cue signal (input or sidechain) this segment
+    std::vector<float> scMonoBuf;
+
+    // heads: head 0 is the main echo; current/previous refer to its playlists
+    struct PastEcho
+    {
+        std::vector<EchoWeight> weights;
+        std::vector<uint64_t> serials;
+        int count = 0;
+        float tracking = 1.0f;
+    };
+    std::array<PastEcho, kNumHeads - 1> history;   // head 1's echo 1 and 2 segments ago
+    std::array<std::vector<EchoWeight>, kNumHeads> headWeights;
+    std::array<int, kNumHeads> headWeightCount {};
+    float familiarity = 0.0f, familiarityTarget = 0.0f;
+    float mainTracking = 1.0f;
+    FeatureVector iterCue {};
+    float headGainNow[kNumHeads] { 1.0f, 0.0f, 0.0f };
+    float headGainInc[kNumHeads] {};
+    float toneCoeff = 1.0f;
+    bool toneActive = false;
+    float feedbackNow = 0.0f;
+    float toneZ[kMaxChannels] {};
 
     // live cueing
     int nextSlot = 1;                        // Progressive: next slot edge to act on
@@ -226,7 +267,9 @@ private:
     int64_t lastSearchStart = -(int64_t { 1 } << 40);
     uint64_t cueUpdates = 0;
     std::vector<EchoWeight> weights;
-    Playlist current, previous;
+    std::array<Playlist, kNumHeads> headCurrent, headPrevious;
+    Playlist& current = headCurrent[0];
+    Playlist& previous = headPrevious[0];
     std::vector<float> echoBuf[kMaxChannels];
     std::vector<float> monoBuf, echoMonoBuf;
 

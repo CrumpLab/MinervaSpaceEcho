@@ -50,7 +50,13 @@ RetrievalResult finishRetrieval (const TraceStore& store, const RetrievalSetting
     for (int i = 0; i < n; ++i)
     {
         auto& w = out[i];
-        float a = activation (w.activation, settings.power) * store.slot (w.slot).strength;
+        const auto& trace = store.slot (w.slot);
+        float a = activation (w.activation, settings.power) * trace.strength;
+        if (settings.recency > 0.0f)
+        {
+            const auto age = static_cast<float> (store.currentSerial() - std::min (store.currentSerial(), trace.serial + 1));
+            a *= std::exp (-settings.recency * age / 4.0f);
+        }
         if (settings.negativeMode == NegativeMode::Ignore)
             a = std::max (a, 0.0f);
         else if (settings.negativeMode == NegativeMode::Absolute)
@@ -92,8 +98,13 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
     for (int i = 0; i < store.size(); ++i)
     {
         const int slot = store.storedSlot (i);
-        if (slot != settings.excludeSlot)
-            out[n++] = { slot, similarity (probe, store.slot (slot).features, settings.similarity), 0.0f, 0 };
+        if (slot == settings.excludeSlot)
+            continue;
+        const auto& f = store.slot (slot).features;
+        const float s = settings.focus == FeatureFocus::Full
+                            ? similarity (probe, f, settings.similarity)
+                            : focusedSimilarity (probe, f, settings.similarity, settings.focus, 0, kSlots, false);
+        out[n++] = { slot, s, 0.0f, 0 };
     }
     return finishRetrieval (store, settings, out, n);
 }
@@ -144,6 +155,102 @@ float prefixSimilarity (const FeatureVector& p, const FeatureVector& t, Similari
     else
         s = (pp > 0.0 && tt > 0.0) ? dot / std::sqrt (pp * tt) : 0.0;
     return static_cast<float> (std::clamp (s, -1.0, 1.0));
+}
+
+FeatureVector focusVector (const FeatureVector& v, FeatureFocus focus, int slotBegin, int slotEnd) noexcept
+{
+    if (focus == FeatureFocus::Full)
+        return v;
+    FeatureVector out {};
+    slotBegin = std::clamp (slotBegin, 0, kSlots);
+    slotEnd = std::clamp (slotEnd, slotBegin, kSlots);
+    if (focus == FeatureFocus::Rhythm)
+    {
+        for (int s = slotBegin; s < slotEnd; ++s)
+        {
+            double sum = 0.0;
+            int n = 0;
+            for (int b = 0; b < kBands; ++b)
+                if (const float x = v[static_cast<size_t> (s * kBands + b)]; x != 0.0f)
+                {
+                    sum += x;
+                    ++n;
+                }
+            out[static_cast<size_t> (s * kBands)] = n > 0 ? static_cast<float> (sum / n) : 0.0f;
+        }
+    }
+    else
+    {
+        for (int b = 0; b < kBands; ++b)
+        {
+            double sum = 0.0;
+            int n = 0;
+            for (int s = slotBegin; s < slotEnd; ++s)
+                if (const float x = v[static_cast<size_t> (s * kBands + b)]; x != 0.0f)
+                {
+                    sum += x;
+                    ++n;
+                }
+            out[static_cast<size_t> (b)] = n > 0 ? static_cast<float> (sum / n) : 0.0f;
+        }
+    }
+    return out;
+}
+
+float focusedSimilarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind, FeatureFocus focus,
+                         int slotBegin, int slotEnd, bool renormalize) noexcept
+{
+    if (focus == FeatureFocus::Full)
+        return prefixSimilarity (probe, trace, kind, slotBegin, slotEnd, renormalize);
+    const auto p = focusVector (probe, focus, slotBegin, slotEnd);
+    const auto t = focusVector (trace, focus, slotBegin, slotEnd);
+    // Rhythm keeps the slot range; timbre lives in slot 0.
+    return focus == FeatureFocus::Rhythm ? prefixSimilarity (p, t, kind, slotBegin, slotEnd, true)
+                                         : prefixSimilarity (p, t, kind, 0, 1, true);
+}
+
+void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
+                   float ternaryThreshold, FeatureVector& out) noexcept
+{
+    std::array<double, kFeatureSize> acc {};
+    double total = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& f = store.slot (weights[i].slot).features;
+        const double w = weights[i].weight;
+        for (size_t j = 0; j < acc.size(); ++j)
+            acc[j] += w * f[j];
+        total += std::abs (w);
+    }
+    out.fill (0.0f);
+    if (total <= 0.0)
+        return;
+
+    double sum = 0.0, sq = 0.0;
+    int count = 0;
+    for (auto& a : acc)
+    {
+        a /= total;
+        if (a != 0.0)
+        {
+            sum += a;
+            sq += a * a;
+            ++count;
+        }
+    }
+    if (count < 2)
+        return;
+    const double mean = sum / count;
+    const double sd = std::sqrt (std::max (1.0e-12, sq / count - mean * mean));
+    for (size_t j = 0; j < acc.size(); ++j)
+    {
+        if (acc[j] == 0.0)
+            continue;
+        auto z = static_cast<float> ((acc[j] - mean) / sd);
+        if (mode == FeatureMode::Ternary)
+            z = z > ternaryThreshold ? 1.0f : (z < -ternaryThreshold ? -1.0f : 0.0f);
+        out[j] = z;
+    }
 }
 
 bool prepareWindowProbe (const float* const* frames, int numFrames, WindowProbe& out) noexcept

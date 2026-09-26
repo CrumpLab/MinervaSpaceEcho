@@ -1,0 +1,8 @@
+# Sample playback: each bar, one memory is drawn at random (weighted by
+# activation). From bar 12 the cue is random, so memory dreams on its own (echo only).
+playback = Sample
+capacity = 100
+power = 3
+self_match = off
+dry_level_db = -60
+@12 cue_source = Random

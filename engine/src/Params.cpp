@@ -15,6 +15,11 @@ const char* const kWriteModeChoices[] = { "Auto", "Manual" };
 const char* const kNoveltyChoices[] = { "Off", "Store Novel", "Store Familiar" };
 const char* const kSourceChoices[] = { "Input", "Echo", "Input + Echo" };
 const char* const kCueModeChoices[] = { "Segment", "Progressive", "Rolling" };
+const char* const kCueSourceChoices[] = { "Input", "Sidechain", "Random", "Frozen" };
+const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
+const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
+const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
+const char* const kPlaybackChoices[] = { "Blend", "Voices", "Sample" };
 const char* const kSimilarityChoices[] = { "Hintzman", "Cosine" };
 const char* const kFeatureChoices[] = { "Continuous", "Ternary" };
 const char* const kNegativeChoices[] = { "Subtract", "Ignore", "Absolute" };
@@ -65,6 +70,29 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "rolling_interval_ms","Rolling Interval",      ParamType::Float,  20,   1000,   100,   150,  "ms",     NOCHOICE,                      true },
     { "lookahead_ms",       "Prediction",            ParamType::Float,  0,    2000,   0,     250,  "ms",     NOCHOICE,                      true },
     { "cue_smoothing_ms",   "Cue Smoothing",         ParamType::Float,  1,    500,    40,    60,   "ms",     NOCHOICE,                      true },
+    { "cue_source",         "Cue Source",            ParamType::Choice, 0,    3,      0,     0,    "",       CHOICE (kCueSourceChoices),    true },
+    { "feature_focus",      "Feature Focus",         ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kFocusChoices),        true },
+    { "recency",            "Recency",               ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    // heads
+    { "mode_selector",      "Mode Selector",         ParamType::Choice, 0,    8,      0,     0,    "",       CHOICE (kSelectorChoices),     true },
+    { "head1_level_db",     "Head 1 Level",          ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
+    { "head1_pan",          "Head 1 Pan",            ParamType::Float,  -1,   1,      0,     0,    "",       NOCHOICE,                      true },
+    { "head2_mode",         "Head 2",                ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kHeadModeChoices),     true },
+    { "head2_level_db",     "Head 2 Level",          ParamType::Float,  kLevelOffDb, 6, -6,  0,    "dB",     NOCHOICE,                      true },
+    { "head2_pan",          "Head 2 Pan",            ParamType::Float,  -1,   1,      -0.5f, 0,    "",       NOCHOICE,                      true },
+    { "head3_mode",         "Head 3",                ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kHeadModeChoices),     true },
+    { "head3_level_db",     "Head 3 Level",          ParamType::Float,  kLevelOffDb, 6, -9,  0,    "dB",     NOCHOICE,                      true },
+    { "head3_pan",          "Head 3 Pan",            ParamType::Float,  -1,   1,      0.5f,  0,    "",       NOCHOICE,                      true },
+    // playback
+    { "playback",           "Playback",              ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kPlaybackChoices),     true },
+    { "voices",             "Voices",                ParamType::Int,    1,    8,      4,     0,    "",       NOCHOICE,                      true },
+    { "voice_spread",       "Voice Spread",          ParamType::Float,  0,    1,      0.7f,  0,    "",       NOCHOICE,                      true },
+    { "voice_detune",       "Voice Detune",          ParamType::Float,  0,    50,     8,     0,    "cents",  NOCHOICE,                      true },
+    { "voice_delay_ms",     "Voice Delay",           ParamType::Float,  0,    50,     12,    0,    "ms",     NOCHOICE,                      true },
+    // tone and modulation
+    { "echo_tone_hz",       "Echo Tone",             ParamType::Float,  200,  20000,  20000, 2000, "Hz",     NOCHOICE,                      true },
+    { "intensity_to_tone",  "Familiarity > Tone",    ParamType::Float,  -1,   1,      0,     0,    "",       NOCHOICE,                      true },
+    { "intensity_to_feedback", "Familiarity > Feedback", ParamType::Float, -1, 1,    0,     0,    "",       NOCHOICE,                      true },
     // retrieval
     { "power",              "Activation Power",      ParamType::Float,  1,    9,      3,     0,    "",       NOCHOICE,                      true },
     { "similarity",         "Similarity",            ParamType::Choice, 0,    1,      0,     0,    "",       CHOICE (kSimilarityChoices),   true },
@@ -164,6 +192,30 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.rollingIntervalMs = v (kRollingIntervalMs);
     p.lookaheadMs = v (kLookaheadMs);
     p.cueSmoothingMs = v (kCueSmoothingMs);
+
+    p.cueSource = static_cast<CueSource> (idx (kCueSource));
+    p.featureFocus = static_cast<FeatureFocus> (idx (kFeatureFocus));
+    p.recency = v (kRecency);
+
+    p.modeSelector = static_cast<ModeSelector> (idx (kModeSelector));
+    p.headLevelDb[0] = v (kHead1LevelDb);
+    p.headPan[0] = v (kHead1Pan);
+    p.headMode[1] = static_cast<HeadMode> (idx (kHead2Mode));
+    p.headLevelDb[1] = v (kHead2LevelDb);
+    p.headPan[1] = v (kHead2Pan);
+    p.headMode[2] = static_cast<HeadMode> (idx (kHead3Mode));
+    p.headLevelDb[2] = v (kHead3LevelDb);
+    p.headPan[2] = v (kHead3Pan);
+
+    p.playback = static_cast<Playback> (idx (kPlayback));
+    p.voices = idx (kVoices);
+    p.voiceSpread = v (kVoiceSpread);
+    p.voiceDetuneCents = v (kVoiceDetune);
+    p.voiceDelayMs = v (kVoiceDelayMs);
+
+    p.echoToneHz = v (kEchoToneHz);
+    p.intensityToTone = v (kIntensityToTone);
+    p.intensityToFeedback = v (kIntensityToFeedback);
 
     p.power = v (kPower);
     p.similarity = static_cast<Similarity> (idx (kSimilarity));

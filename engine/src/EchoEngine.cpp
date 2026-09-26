@@ -60,8 +60,17 @@ EchoEngine::EchoEngine()
     rollingSerials.resize (kMaxCapacity);
     envRing.resize (kEnvRing);
     refineScratch.resize (8192);
-    current.entries.resize (kMaxCapacity);
-    previous.entries.resize (kMaxCapacity);
+    for (int h = 0; h < kNumHeads; ++h)
+    {
+        headCurrent[static_cast<size_t> (h)].entries.resize (kMaxCapacity);
+        headPrevious[static_cast<size_t> (h)].entries.resize (kMaxCapacity);
+        headWeights[static_cast<size_t> (h)].resize (kMaxCapacity);
+    }
+    for (auto& past : history)
+    {
+        past.weights.resize (kMaxCapacity);
+        past.serials.resize (kMaxCapacity);
+    }
 }
 
 EchoEngine::~EchoEngine() = default;
@@ -76,6 +85,8 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
 
     features.prepare (sampleRate);
     echoFeatures.prepare (sampleRate);
+    scFeatures.prepare (sampleRate);
+    scMonoBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
     envStep = std::max (1, static_cast<int> (std::lround (sampleRate / 1000.0)));
     envProduced = 0;
     envAcc = 0.0;
@@ -349,9 +360,27 @@ EngineStats EchoEngine::getStats() const noexcept
 
 // ==== audio thread ===================================================================
 
+void EchoEngine::clearHeads() noexcept
+{
+    for (int h = 0; h < kNumHeads; ++h)
+    {
+        headCurrent[static_cast<size_t> (h)].count = headPrevious[static_cast<size_t> (h)].count = 0;
+        headWeightCount[static_cast<size_t> (h)] = 0;
+    }
+    for (auto& past : history)
+        past.count = 0;
+}
+
 void EchoEngine::resetPlayback() noexcept
 {
-    current.count = previous.count = 0;
+    clearHeads();
+    familiarity = familiarityTarget = 0.0f;
+    toneZ[0] = toneZ[1] = 0.0f;
+    cueSegEnergy = 0.0;
+    {
+        HeadMode modes[kNumHeads];
+        effectiveHeads (modes, headGainNow);
+    }
     writeIdx = segBegin = 0;
     segNominal = 0.0;
     segEnergy = echoSegEnergy = 0.0;
@@ -397,6 +426,10 @@ void EchoEngine::adoptPendingStore() noexcept
     store = std::move (fresh);
     liveStore.store (store.get(), std::memory_order_release);
     rolling.active = false; // slot indices refer to the old store
+    for (auto& past : history)
+        past.count = 0;
+    for (auto& c : headWeightCount)
+        c = 0;
     if (! pendingKeepsTraces)
     {
         segmentCount = static_cast<uint64_t> (store->size());
@@ -478,13 +511,18 @@ void EchoEngine::processCommands() noexcept
             case Command::ClearUnclamped:
                 rolling.active = false;
                 store->clearUnclamped();
-                dropMissingEntries (current);
-                dropMissingEntries (previous);
+                for (int h = 0; h < kNumHeads; ++h)
+                {
+                    dropMissingEntries (headCurrent[static_cast<size_t> (h)]);
+                    dropMissingEntries (headPrevious[static_cast<size_t> (h)]);
+                }
+                for (auto& past : history)
+                    past.count = 0;
                 break;
             case Command::ClearAll:
                 rolling.active = false;
                 store->clear();
-                current.count = previous.count = 0;
+                clearHeads();
                 segmentCount = evictionCount = mergeCount = rejectionCount = 0;
                 writeIdx = segBegin = 0; // drop the half-recorded segment too
                 segEnergy = echoSegEnergy = 0.0;
@@ -518,12 +556,14 @@ int64_t EchoEngine::recordLimit() const noexcept
     return std::min (store->spareSlot (TraceStore::kInputSpare).maxLen, store->spareSlot (TraceStore::kEchoSpare).maxLen);
 }
 
-void EchoEngine::process (float* const* io, int ioChannels, int numSamples, const HostClock& clock) noexcept
+void EchoEngine::process (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
+                          const float* const* sidechain, int sidechainChannels) noexcept
 {
     lastClock = clock;
     if (store == nullptr || numSamples <= 0)
         return;
     ioChannels = std::clamp (ioChannels, 1, kMaxChannels);
+    sidechainActive = params.cueSource == CueSource::Sidechain && sidechain != nullptr && sidechainChannels > 0;
 
     if (holdRequests.load (std::memory_order_acquire) == 0)
         adoptPendingStore();
@@ -586,12 +626,33 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     const float n = static_cast<float> (numSamples);
     dryInc = (levelToGain (params.dryLevelDb) - dryGain) / n;
     echoInc = (levelToGain (params.echoLevelDb) - echoGain) / n;
+    {
+        HeadMode modes[kNumHeads];
+        float target[kNumHeads];
+        effectiveHeads (modes, target);
+        for (int h = 0; h < kNumHeads; ++h)
+            headGainInc[h] = (target[h] - headGainNow[h]) / n;
+    }
+
+    // Familiarity (the strongest activation of the main echo), smoothed, can
+    // steer the echo's tone and the feedback.
+    familiarity += (familiarityTarget - familiarity) * (1.0f - std::exp (-n / (0.1f * static_cast<float> (sampleRate))));
+    const float fam = 2.0f * familiarity - 1.0f; // -1 unfamiliar .. +1 familiar
+    feedbackNow = std::clamp (params.feedback + 0.5f * params.intensityToFeedback * fam, 0.0f, 1.2f);
+    toneActive = params.echoToneHz < 19999.0f || params.intensityToTone != 0.0f;
+    if (toneActive)
+    {
+        const double fc = std::clamp (params.echoToneHz * std::pow (2.0, 3.0 * params.intensityToTone * fam), 20.0,
+                                      0.45 * sampleRate);
+        toneCoeff = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
+    }
 
     // Rolling cue: search memory incrementally, a bounded amount per block.
     if (params.cueMode == CueMode::Rolling)
     {
         const auto interval = static_cast<int64_t> (params.rollingIntervalMs * 0.001 * sampleRate);
-        if (! rolling.active && features.streamPosition() - lastSearchStart >= interval)
+        const bool liveCue = params.cueSource == CueSource::Input || params.cueSource == CueSource::Sidechain;
+        if (liveCue && ! rolling.active && cueFx().streamPosition() - lastSearchStart >= interval)
             startRollingSearch();
         if (rolling.active)
             continueRollingSearch (static_cast<int64_t> (kSearchMacsPerSample) * numSamples);
@@ -621,7 +682,7 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
                 toEvent = std::min (toEvent, slotEdge (nextSlot) - writeIdx);
         }
         const int chunk = static_cast<int> (std::min<int64_t> (numSamples - done, toEvent));
-        processChunk (io, ioChannels, done, chunk);
+        processChunk (io, ioChannels, done, chunk, sidechain, sidechainChannels);
         done += chunk;
         nextBoundary -= chunk;
     }
@@ -630,6 +691,10 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
 
     dryGain = levelToGain (params.dryLevelDb);
     echoGain = levelToGain (params.echoLevelDb);
+    {
+        HeadMode modes[kNumHeads];
+        effectiveHeads (modes, headGainNow);
+    }
 
     // Output gain (one-pole smoothed; exact pass-through when settled at unity).
     const float target = std::pow (10.0f, params.outputGainDb / 20.0f);
@@ -943,15 +1008,19 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
         // In Rolling mode the echo is driven by the search, not by bar lines.
         if (params.cueMode != CueMode::Rolling)
         {
-            // Cue gate: a (near-)silent segment evokes nothing, even though its
-            // level-independent features could still match loud memories.
-            const bool gated = params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb;
+            // The cue: this segment's input (or sidechain), a random address or a
+            // frozen one. Cue gate: a (near-)silent live cue evokes nothing, even
+            // though its level-independent features could still match loud memories.
+            float liveCueRms = cueRms;
+            const bool live = makeCue (cue, liveCueRms, recorded);
+            const bool gated = live && params.cueGateDb > kCueGateOffDb && toDb (liveCueRms) < params.cueGateDb;
             auto rs = retrievalSettings();
             rs.excludeSlot = params.selfMatch ? -1 : selfSlot;
-            const auto result = gated ? RetrievalResult {} : retrieve (probe, *store, rs, weights.data());
+            const auto result = gated ? RetrievalResult {} : retrieve (cue, *store, rs, weights.data());
             if (! held)
                 noteUse (result);
-            installEcho (result, cueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
+            installMain (result, liveCueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
+            updateOtherHeads (mainTracking, newBegin);
         }
         if (! held)
             endMutation();
@@ -969,6 +1038,8 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
     auto& spare = store->spareSlot (TraceStore::kInputSpare);
     auto& echoSpare = store->spareSlot (TraceStore::kEchoSpare);
     features.beginSegment (segNominal, spare.frames, spare.maxFrames);
+    scFeatures.beginSegment (segNominal);
+    cueSegEnergy = 0.0;
     echoFeatures.beginSegment (segNominal, echoSpare.frames, echoSpare.maxFrames);
     nextSlot = static_cast<int> (static_cast<double> (newBegin) * kSlots / std::max (1.0, segNominal)) + 1;
 
@@ -990,6 +1061,8 @@ RetrievalSettings EchoEngine::retrievalSettings() const noexcept
     rs.power = params.power;
     rs.negativeMode = params.negativeMode;
     rs.normalization = params.normalization;
+    rs.focus = params.featureFocus;
+    rs.recency = params.recency;
     return rs;
 }
 
@@ -999,46 +1072,124 @@ void EchoEngine::noteUse (const RetrievalResult& result) noexcept
         store->slot (weights[static_cast<size_t> (i)].slot).useCount += std::abs (weights[static_cast<size_t> (i)].activation);
 }
 
-void EchoEngine::installEcho (const RetrievalResult& result, float cueRms, int64_t pos,
-                              int64_t fadeOutLen, int64_t fadeInLen) noexcept
+float EchoEngine::trackingFor (const EchoWeight* w, int n, float cueRms) const noexcept
 {
     // Level tracking: scale the echo so its level follows the cue's, the way
     // a tape repeat follows what was played. Memory picks *what* returns;
     // the input decides *how loud*. (Capacity 1: the factor is exactly 1.)
-    float tracking = 1.0f;
-    if (params.levelTracking > 0.0f && result.numWeights > 0)
+    // A negative cueRms means the cue has no level (random / frozen cues).
+    if (params.levelTracking <= 0.0f || n == 0 || cueRms < 0.0f)
+        return 1.0f;
+    // Activation-weighted mean level of what was retrieved. Using the mean
+    // (not the weighted sum) leaves the normalisation mode's own loudness
+    // behaviour (e.g. Familiarity) intact.
+    double weighted = 0.0, total = 0.0;
+    for (int i = 0; i < n; ++i)
     {
-        // Activation-weighted mean level of what was retrieved. Using the
-        // mean (not the weighted sum) leaves the normalisation mode's own
-        // loudness behaviour (e.g. Familiarity) intact.
-        double weighted = 0.0, total = 0.0;
-        for (int i = 0; i < result.numWeights; ++i)
-        {
-            const auto& w = weights[static_cast<size_t> (i)];
-            weighted += std::abs (w.weight) * store->slot (w.slot).rms;
-            total += std::abs (w.weight);
-        }
-        const double memoryRms = total > 0.0 ? weighted / total : 0.0;
-        const float ratio = memoryRms > 0.0 ? std::min (kMaxTrackingGain, static_cast<float> (cueRms / memoryRms)) : 0.0f;
-        tracking = std::pow (ratio, params.levelTracking);
+        weighted += std::abs (w[i].weight) * store->slot (w[i].slot).rms;
+        total += std::abs (w[i].weight);
+    }
+    const double memoryRms = total > 0.0 ? weighted / total : 0.0;
+    const float ratio = memoryRms > 0.0 ? std::min (kMaxTrackingGain, static_cast<float> (cueRms / memoryRms)) : 0.0f;
+    return std::pow (ratio, params.levelTracking);
+}
+
+void EchoEngine::effectiveHeads (HeadMode modes[kNumHeads], float gains[kNumHeads]) const noexcept
+{
+    bool head1 = true;
+    HeadMode m2 = params.headMode[1], m3 = params.headMode[2];
+    switch (params.modeSelector)
+    {
+        case ModeSelector::Custom:       break;
+        case ModeSelector::H1:           m2 = m3 = HeadMode::Off; break;
+        case ModeSelector::H2:           head1 = false; m2 = HeadMode::Delay; m3 = HeadMode::Off; break;
+        case ModeSelector::H3:           head1 = false; m2 = HeadMode::Off; m3 = HeadMode::Delay; break;
+        case ModeSelector::H2H3:         head1 = false; m2 = m3 = HeadMode::Delay; break;
+        case ModeSelector::H1H2:         m2 = HeadMode::Delay; m3 = HeadMode::Off; break;
+        case ModeSelector::H1H3:         m2 = HeadMode::Off; m3 = HeadMode::Delay; break;
+        case ModeSelector::H1H2H3:       m2 = m3 = HeadMode::Delay; break;
+        case ModeSelector::Iterative123: m2 = m3 = HeadMode::Iterative; break;
+    }
+    modes[0] = HeadMode::Delay;
+    modes[1] = m2;
+    modes[2] = m3;
+    gains[0] = head1 ? levelToGain (params.headLevelDb[0]) : 0.0f;
+    for (int h = 1; h < kNumHeads; ++h)
+        gains[h] = modes[h] == HeadMode::Off ? 0.0f : levelToGain (params.headLevelDb[h]);
+}
+
+int EchoEngine::shapePlayback (EchoWeight* w, int n) noexcept
+{
+    if (n <= 1 || params.playback == Playback::Blend)
+        return n;
+
+    double total = 0.0;
+    for (int i = 0; i < n; ++i)
+        total += std::abs (w[i].weight);
+
+    if (params.playback == Playback::Sample)
+    {
+        // One trace, chosen with probability proportional to its activation.
+        double sum = 0.0;
+        for (int i = 0; i < n; ++i)
+            sum += std::abs (w[i].activation);
+        double r = random01() * sum;
+        int pick = n - 1;
+        for (int i = 0; i < n; ++i)
+            if ((r -= std::abs (w[i].activation)) <= 0.0)
+            {
+                pick = i;
+                break;
+            }
+        w[0] = w[pick];
+        w[0].weight = static_cast<float> (std::copysign (total, w[0].weight));
+        return 1;
     }
 
+    // Voices: the k strongest traces, strongest first, at the same total level.
+    const int k = std::min (params.voices, n);
+    for (int i = 0; i < k; ++i)
+    {
+        int best = i;
+        for (int j = i + 1; j < n; ++j)
+            if (std::abs (w[j].activation) > std::abs (w[best].activation))
+                best = j;
+        std::swap (w[i], w[best]);
+    }
+    double kept = 0.0;
+    for (int i = 0; i < k; ++i)
+        kept += std::abs (w[i].weight);
+    const float scale = kept > 0.0 ? static_cast<float> (total / kept) : 0.0f;
+    for (int i = 0; i < k; ++i)
+        w[i].weight *= scale;
+    return k;
+}
+
+void EchoEngine::installEcho (int head, const EchoWeight* src, int n, float tracking, int64_t pos,
+                              int64_t fadeOutLen, int64_t fadeInLen) noexcept
+{
+    auto& cur = headCurrent[static_cast<size_t> (head)];
+    auto& prev = headPrevious[static_cast<size_t> (head)];
+
     // The current echo keeps playing briefly while fading out.
-    std::swap (previous.entries, current.entries);
-    previous.count = current.count;
-    previous.pos = current.pos;
-    previous.rampPos = 0;
-    previous.rampLen = fadeOutLen;
-    previous.fadingOut = true;
+    std::swap (prev.entries, cur.entries);
+    prev.count = cur.count;
+    prev.pos = cur.pos;
+    prev.rampPos = 0;
+    prev.rampLen = fadeOutLen;
+    prev.fadingOut = true;
     if (fadeOutLen == 0)
-        previous.count = 0;
+        prev.count = 0;
 
     const auto lookahead = static_cast<int64_t> (std::llround (params.lookaheadMs * 0.001 * sampleRate));
     const uint64_t now = store->currentSerial();
-    current.count = result.numWeights;
-    for (int i = 0; i < result.numWeights; ++i)
+    const bool voices = params.playback == Playback::Voices && n > 1;
+    const float headPan = params.headPan[head];
+
+    cur.count = n;
+    for (int i = 0; i < n; ++i)
     {
-        const auto& w = weights[static_cast<size_t> (i)];
+        const auto& w = src[i];
         const auto& s = store->slot (w.slot);
         float coeff = 1.0f;
         if (params.wearTone > 0.0f)
@@ -1048,18 +1199,145 @@ void EchoEngine::installEcho (const RetrievalResult& result, float cueRms, int64
             const double fc = std::clamp (18000.0 * std::exp (-params.wearTone * age / 8.0), 200.0, 0.45 * sampleRate);
             coeff = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
         }
-        current.entries[static_cast<size_t> (i)] = { { s.audio[0], s.audio[1] }, s.begin, s.end, w.offset + lookahead,
-                                                      w.weight * tracking, w.slot, coeff, { 0.0f, 0.0f } };
+
+        // Chorus voices: the strongest sits in the centre; the others fan out
+        // alternately left and right, each more detuned and delayed.
+        float voicePos = 0.0f;
+        if (voices)
+        {
+            const int rank = (i + 1) / 2;
+            const int maxRank = n / 2;
+            voicePos = static_cast<float> (rank) / static_cast<float> (std::max (1, maxRank)) * (i % 2 == 1 ? -1.0f : 1.0f);
+        }
+        const float pan = std::clamp (headPan + voicePos * params.voiceSpread, -1.0f, 1.0f);
+        const float cents = voicePos * params.voiceDetuneCents;
+        const auto voiceDelay = static_cast<int64_t> (std::llround (std::abs (voicePos) * params.voiceDelayMs * 0.001 * sampleRate));
+        const float g = w.weight * tracking;
+
+        auto& e = cur.entries[static_cast<size_t> (i)];
+        e.audio[0] = s.audio[0];
+        e.audio[1] = s.audio[1];
+        e.begin = s.begin;
+        e.end = s.end;
+        e.offset = w.offset + lookahead - voiceDelay;
+        e.weight = g;
+        e.slot = w.slot;
+        e.toneCoeff = coeff;
+        e.z[0] = e.z[1] = 0.0f;
+        e.gain[0] = g * std::min (1.0f, 1.0f - pan);
+        e.gain[1] = g * std::min (1.0f, 1.0f + pan);
+        e.rate = cents != 0.0f ? std::pow (2.0, cents / 1200.0) : 1.0;
+        e.anchor = pos;
     }
-    current.pos = pos;
-    current.rampPos = 0;
-    current.rampLen = fadeInLen;
-    current.fadingOut = false;
+    cur.pos = pos;
+    cur.rampPos = 0;
+    cur.rampLen = fadeInLen;
+    cur.fadingOut = false;
+}
+
+void EchoEngine::installMain (const RetrievalResult& result, float cueRms, int64_t pos, int64_t fadeOutLen,
+                              int64_t fadeInLen) noexcept
+{
+    const int n = result.numWeights;
+    auto& mine = headWeights[0];
+    std::copy (weights.begin(), weights.begin() + n, mine.begin());
+    headWeightCount[0] = n;
+    const float tracking = trackingFor (mine.data(), n, cueRms);
+    mainTracking = tracking;
+
+    // Shape a copy so the unshaped echo stays available to the other heads.
+    std::copy (mine.begin(), mine.begin() + n, weights.begin());
+    const int shaped = shapePlayback (weights.data(), n);
+    installEcho (0, weights.data(), shaped, tracking, pos, fadeOutLen, fadeInLen);
 
     ++cueUpdates;
+    familiarityTarget = std::clamp (result.maxAbs, 0.0f, 1.0f);
     stats.intensity.store (result.intensity, std::memory_order_relaxed);
     stats.maxActivation.store (result.maxAbs, std::memory_order_relaxed);
-    stats.activeTraces.store (result.numWeights, std::memory_order_relaxed);
+    stats.activeTraces.store (shaped, std::memory_order_relaxed);
+}
+
+void EchoEngine::updateOtherHeads (float tracking, int64_t pos) noexcept
+{
+    HeadMode modes[kNumHeads];
+    float gains[kNumHeads];
+    effectiveHeads (modes, gains);
+    const int64_t fadeIn = pos > 0 ? fadeSamples : 0;
+
+    for (int h = 1; h < kNumHeads; ++h)
+    {
+        auto& out = headWeights[static_cast<size_t> (h)];
+        int n = 0;
+        float headTracking = tracking;
+        if (modes[h] == HeadMode::Delay)
+        {
+            // Tape head h+1: what head 1 played h segments ago (still in memory).
+            const auto& past = history[static_cast<size_t> (h - 1)];
+            for (int i = 0; i < past.count; ++i)
+            {
+                const auto& w = past.weights[static_cast<size_t> (i)];
+                if (store->slot (w.slot).serial == past.serials[static_cast<size_t> (i)])
+                    out[static_cast<size_t> (n++)] = w;
+            }
+            headTracking = past.tracking;
+        }
+        else if (modes[h] == HeadMode::Iterative)
+        {
+            // Echo of the echo: cue memory with the previous head's echo content.
+            const int from = headWeightCount[static_cast<size_t> (h - 1)] > 0 ? h - 1 : 0;
+            echoAddress (headWeights[static_cast<size_t> (from)].data(), headWeightCount[static_cast<size_t> (from)],
+                         *store, params.featureMode, params.ternaryThreshold, iterCue);
+            n = retrieve (iterCue, *store, retrievalSettings(), out.data()).numWeights;
+        }
+        headWeightCount[static_cast<size_t> (h)] = n;
+
+        std::copy (out.begin(), out.begin() + n, weights.begin());
+        const int shaped = shapePlayback (weights.data(), n);
+        installEcho (h, weights.data(), shaped, headTracking, pos, fadeSamples, fadeIn);
+    }
+
+    // Remember head 1's echo for the delay heads.
+    std::swap (history[1], history[0]);
+    auto& now = history[0];
+    now.count = headWeightCount[0];
+    for (int i = 0; i < now.count; ++i)
+    {
+        now.weights[static_cast<size_t> (i)] = headWeights[0][static_cast<size_t> (i)];
+        now.serials[static_cast<size_t> (i)] = store->slot (headWeights[0][static_cast<size_t> (i)].slot).serial;
+    }
+    now.tracking = tracking;
+}
+
+bool EchoEngine::makeCue (FeatureVector& out, float& cueRms, int64_t recorded) noexcept
+{
+    switch (params.cueSource)
+    {
+        case CueSource::Random:
+            // Dreaming: a random address.
+            for (auto& f : out)
+            {
+                const float r = random01() * 2.0f - 1.0f;
+                f = params.featureMode == FeatureMode::Ternary ? (r > 0.33f ? 1.0f : (r < -0.33f ? -1.0f : 0.0f))
+                                                               : r * 1.7f;
+            }
+            cueRms = -1.0f;
+            return false;
+        case CueSource::Frozen:
+            out = frozenCue;
+            cueRms = frozenCueRms;
+            return false;
+        case CueSource::Sidechain:
+        case CueSource::Input:
+            break;
+    }
+    if (sidechainActive)
+        scFeatures.finalize (out, { params.featureMode, params.ternaryThreshold });
+    else
+        out = probe; // the input's own address, computed at the boundary
+    cueRms = static_cast<float> (std::sqrt (cueSegEnergy / static_cast<double> (std::max<int64_t> (1, recorded))));
+    frozenCue = out;
+    frozenCueRms = cueRms;
+    return true;
 }
 
 // ---- live cueing (plan §3 Modes B and C) --------------------------------------------------
@@ -1074,14 +1352,16 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     const int64_t recorded = writeIdx - segBegin;
     if (recorded <= 0 || k < params.progressiveStart)
         return;
+    if (params.cueSource == CueSource::Random || params.cueSource == CueSource::Frozen)
+        return; // only a live cue unfolds within the bar
 
     // The bar so far, compared with the same stretch of every stored trace.
-    features.finalize (partialProbe, { params.featureMode, params.ternaryThreshold });
-    const float cueRms = static_cast<float> (std::sqrt (segEnergy / static_cast<double> (recorded)));
+    cueFx().finalize (partialProbe, { params.featureMode, params.ternaryThreshold });
+    const float cueRms = static_cast<float> (std::sqrt (cueSegEnergy / static_cast<double> (recorded)));
     const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
     if (params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb)
     {
-        installEcho ({}, cueRms, writeIdx, smooth, smooth);
+        installMain ({}, cueRms, writeIdx, smooth, smooth);
         return;
     }
 
@@ -1091,8 +1371,8 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     for (int i = 0; i < store->size(); ++i)
     {
         const int slot = store->storedSlot (i);
-        const float sim = prefixSimilarity (partialProbe, store->slot (slot).features, params.similarity,
-                                            firstSlot, k, renormalize);
+        const float sim = focusedSimilarity (partialProbe, store->slot (slot).features, params.similarity,
+                                             params.featureFocus, firstSlot, k, renormalize);
         weights[static_cast<size_t> (n++)] = { slot, sim, 0.0f, 0 };
     }
     const auto result = finishRetrieval (*store, retrievalSettings(), weights.data(), n);
@@ -1104,7 +1384,7 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     }
 
     // Memories play in step with the bar being played (position writeIdx).
-    installEcho (result, cueRms, writeIdx, smooth, smooth);
+    installMain (result, cueRms, writeIdx, smooth, smooth);
 }
 
 int64_t EchoEngine::refineOffset (const TraceSlot& trace, int64_t offset, int64_t probeEnd, int windowSamples) const noexcept
@@ -1187,7 +1467,8 @@ void EchoEngine::startRollingSearch() noexcept
 {
     const int W = std::clamp (static_cast<int> (std::lround (params.rollingWindowMs * 0.001 / kFrameSeconds)), 3,
                               kMaxWindowFrames);
-    const int64_t produced = features.framesProduced();
+    auto& fx = cueFx();
+    const int64_t produced = fx.framesProduced();
     if (produced < W || W > kFrameRing)
         return;
 
@@ -1196,19 +1477,19 @@ void EchoEngine::startRollingSearch() noexcept
     for (int f = 0; f < W; ++f)
     {
         const int64_t idx = produced - W + f;
-        frames[f] = features.ringFrame (idx);
-        power += features.ringEnergy (idx);
+        frames[f] = fx.ringFrame (idx);
+        power += fx.ringEnergy (idx);
     }
-    lastSearchStart = features.streamPosition();
+    lastSearchStart = fx.streamPosition();
     rolling.cueRms = static_cast<float> (std::sqrt (power / W));
-    rolling.probeEnd = features.ringEnd (produced - 1);
+    rolling.probeEnd = fx.ringEnd (produced - 1);
 
     const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
     if ((params.cueGateDb > kCueGateOffDb && toDb (rolling.cueRms) < params.cueGateDb)
         || ! prepareWindowProbe (frames, W, rolling.probe))
     {
         if (current.count > 0)
-            installEcho ({}, rolling.cueRms, 0, smooth, smooth); // silence: let the echo fade
+            installMain ({}, rolling.cueRms, 0, smooth, smooth); // silence: let the echo fade
         return;
     }
     rolling.active = true;
@@ -1219,7 +1500,7 @@ void EchoEngine::startRollingSearch() noexcept
 void EchoEngine::continueRollingSearch (int64_t budget) noexcept
 {
     const int W = rolling.probe.frames;
-    const int hop = features.hop();
+    const int hop = cueFx().hop();
     const int newest = store->size() - 1;
     while (rolling.position < store->size() && budget > 0)
     {
@@ -1243,7 +1524,7 @@ void EchoEngine::continueRollingSearch (int64_t budget) noexcept
 
     // Search complete. Drop results whose trace changed meanwhile, then align
     // every match with "now": the probe ended (now - probeEnd) samples ago.
-    const int64_t elapsed = features.streamPosition() - rolling.probeEnd;
+    const int64_t elapsed = cueFx().streamPosition() - rolling.probeEnd;
     int n = 0;
     for (int i = 0; i < rolling.count; ++i)
     {
@@ -1276,7 +1557,8 @@ void EchoEngine::continueRollingSearch (int64_t budget) noexcept
         endMutation();
     }
     const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
-    installEcho (result, rolling.cueRms, 0, smooth, smooth);
+    // installMain copies the result from `weights`; keep the refined offsets there.
+    installMain (result, rolling.cueRms, 0, smooth, smooth);
     stats.cueLatencyMs.store (static_cast<float> (1000.0 * static_cast<double> (elapsed) / sampleRate),
                               std::memory_order_relaxed);
     rolling.active = false;
@@ -1284,27 +1566,56 @@ void EchoEngine::continueRollingSearch (int64_t budget) noexcept
 
 // ---- playback and recording ------------------------------------------------------------------
 
-void EchoEngine::accumulate (Playlist& pl, int ioChannels, int len) noexcept
+void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOffset, int len) noexcept
 {
     if (pl.count > 0)
     {
         const int storeCh = store->numChannels();
+        const float hg0 = headGainNow[head] + headGainInc[head] * static_cast<float> (blockOffset);
+        const float hgInc = headGainInc[head];
         for (int k = 0; k < pl.count; ++k)
         {
             auto& e = pl.entries[static_cast<size_t> (k)];
             const int64_t fade = std::min (fadeSamples, (e.end - e.begin) / 4);
-            const int64_t base = pl.pos + e.offset; // trace position read at i = 0
-            const int64_t start = std::max<int64_t> (0, e.begin - base);
-            const int64_t stop = std::min<int64_t> (len, e.end - base);
             for (int c = 0; c < ioChannels; ++c)
             {
+                const float chanGain = ioChannels == 1 ? 0.5f * (e.gain[0] + e.gain[1]) : e.gain[c];
+                if (chanGain == 0.0f)
+                    continue;
                 const float* src = e.audio[std::min (c, storeCh - 1)];
                 float* dst = echoBuf[static_cast<size_t> (c)].data();
                 float z = e.z[c];
-                for (int64_t i = start; i < stop; ++i)
+                // At normal speed only the samples inside the trace need visiting.
+                int iBegin = 0, iEnd = len;
+                if (e.rate == 1.0)
                 {
-                    const int64_t t = base + i;
-                    float g = e.weight;
+                    const int64_t base = pl.pos + e.offset;
+                    iBegin = static_cast<int> (std::clamp<int64_t> (e.begin - base, 0, len));
+                    iEnd = static_cast<int> (std::clamp<int64_t> (e.end - base, 0, len));
+                }
+                for (int i = iBegin; i < iEnd; ++i)
+                {
+                    // Read position in the trace (varispeed for detuned voices).
+                    float x;
+                    int64_t t;
+                    if (e.rate == 1.0)
+                    {
+                        t = pl.pos + e.offset + i;
+                        if (t < e.begin || t >= e.end)
+                            continue;
+                        x = src[t];
+                    }
+                    else
+                    {
+                        const double tf = static_cast<double> (e.anchor + e.offset)
+                                          + static_cast<double> (pl.pos + i - e.anchor) * e.rate;
+                        t = static_cast<int64_t> (std::floor (tf));
+                        if (t < e.begin || t + 1 >= e.end)
+                            continue;
+                        const auto frac = static_cast<float> (tf - static_cast<double> (t));
+                        x = src[t] + frac * (src[t + 1] - src[t]);
+                    }
+                    float g = chanGain * (hg0 + hgInc * static_cast<float> (i));
                     if (fade > 0)
                         g *= std::min ({ 1.0f, static_cast<float> (t - e.begin + 1) / fade,
                                          static_cast<float> (e.end - t) / fade });
@@ -1313,7 +1624,7 @@ void EchoEngine::accumulate (Playlist& pl, int ioChannels, int len) noexcept
                         const float r = static_cast<float> (pl.rampPos + i + 1) / static_cast<float> (pl.rampLen);
                         g *= pl.fadingOut ? std::max (0.0f, 1.0f - r) : std::min (1.0f, r);
                     }
-                    float x = g * src[t];
+                    x *= g;
                     if (e.toneCoeff < 1.0f)
                     {
                         z += e.toneCoeff * (x - z);
@@ -1331,17 +1642,47 @@ void EchoEngine::accumulate (Playlist& pl, int ioChannels, int len) noexcept
         pl.count = 0;
 }
 
-void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int len) noexcept
+void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int len, const float* const* sc,
+                               int scChannels) noexcept
 {
     for (int c = 0; c < ioChannels; ++c)
         std::fill_n (echoBuf[static_cast<size_t> (c)].data(), len, 0.0f);
-    accumulate (current, ioChannels, len);
-    accumulate (previous, ioChannels, len);
+    for (int h = 0; h < kNumHeads; ++h)
+    {
+        accumulate (headCurrent[static_cast<size_t> (h)], h, ioChannels, offset, len);
+        accumulate (headPrevious[static_cast<size_t> (h)], h, ioChannels, offset, len);
+    }
+
+    // Echo tone: one-pole low-pass on the echo (its cutoff can follow familiarity).
+    if (toneActive)
+        for (int c = 0; c < ioChannels; ++c)
+        {
+            float* e = echoBuf[static_cast<size_t> (c)].data();
+            float z = toneZ[c];
+            for (int i = 0; i < len; ++i)
+            {
+                z += toneCoeff * (e[i] - z);
+                e[i] = z;
+            }
+            toneZ[c] = z;
+        }
+
+    if (sidechainActive)
+    {
+        const float inv = 1.0f / static_cast<float> (scChannels);
+        for (int i = 0; i < len; ++i)
+        {
+            float m = 0.0f;
+            for (int c = 0; c < scChannels; ++c)
+                m += sc[c][offset + i];
+            scMonoBuf[static_cast<size_t> (i)] = m * inv;
+        }
+    }
 
     auto& spare = store->spareSlot (TraceStore::kInputSpare);
     auto& echoSpare = store->spareSlot (TraceStore::kEchoSpare);
     const int storeCh = store->numChannels();
-    const float fb = params.feedback;
+    const float fb = feedbackNow;
     const float invCh = 1.0f / static_cast<float> (ioChannels);
 
     for (int i = 0; i < len; ++i)
@@ -1370,7 +1711,11 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         mono *= invCh;
         monoBuf[static_cast<size_t> (i)] = mono;
         segEnergy += static_cast<double> (mono) * mono;
-        envAcc += static_cast<double> (mono) * mono;
+
+        // The cue signal: the recorded input, or the sidechain.
+        const float cueMono = sidechainActive ? scMonoBuf[static_cast<size_t> (i)] : mono;
+        cueSegEnergy += static_cast<double> (cueMono) * cueMono;
+        envAcc += static_cast<double> (cueMono) * cueMono;
         if (++envCount == envStep)
         {
             envRing[static_cast<size_t> (envProduced % kEnvRing)] = static_cast<float> (std::sqrt (envAcc / envStep));
@@ -1379,6 +1724,7 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             envCount = 0;
         }
         ++streamPos;
+
         if (recordEchoToo)
         {
             echoMono *= invCh;
@@ -1389,6 +1735,8 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         echoGain += echoInc;
     }
     features.push (monoBuf.data(), len, writeIdx);
+    if (sidechainActive)
+        scFeatures.push (scMonoBuf.data(), len, writeIdx);
     if (recordEchoToo)
         echoFeatures.push (echoMonoBuf.data(), len, writeIdx);
     writeIdx += len;

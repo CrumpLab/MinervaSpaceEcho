@@ -8,7 +8,7 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 3 (live cueing).** The plugin cuts the input into traces
+**Status: Stage 4 (heads and chorus).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
@@ -16,7 +16,9 @@ Capacity = 1 it is exactly a 1-bar tape delay. Stage 2 adds control over what
 memory keeps: freezing, write gates, clamping, full-memory policies,
 consolidation, forgetting, echo re-encoding, and saving and loading memory.
 Stage 3 lets the live input cue memory *while it plays*: progressively within
-the bar, or with no bar grid at all (rolling).
+the bar, or with no bar grid at all (rolling). Stage 4 adds RE-201-style
+playback heads, chorus voices, random sampling, and other cue sources
+(sidechain, random, frozen).
 
 ## How it behaves
 
@@ -66,6 +68,13 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Rolling Window** / **Rolling Interval** | Length of the live cue, and how often memory is searched. |
 | **Prediction** | Play memory this far ahead of the current position: hear what came next last time. |
 | **Cue Smoothing** | Crossfade whenever a live cue changes the echo. |
+| **Cue Source** | What cues memory: the Input, the **Sidechain** (route another track to the plugin's sidechain input in Live), a Random address (memory dreams), or Frozen (the last live cue, held). |
+| **Feature Focus** | Match on everything, on Rhythm only (loudness over time), or on Timbre only (average spectrum). Applies to Segment and Progressive cueing. |
+| **Recency** | Favour recently stored traces (0 = no preference). |
+| **Mode Selector** | The RE-201's head combinations: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3 (delay heads), Iterative 1+2+3, or Custom (use the per-head settings). |
+| **Head 1–3 Level / Pan**, **Head 2 / Head 3** | Head 1 is the main echo. A **Delay** head replays what head 1 played 1 (head 2) or 2 (head 3) segments earlier, like tape heads further along. An **Iterative** head is cued by the previous head's echo (the echo of the echo), drifting toward memory's prototype. Heads 2–3 update at bar lines (not in Rolling mode). |
+| **Playback** / **Voices** / **Voice Spread** / **Voice Detune** / **Voice Delay** | Blend all active memories (MINERVA's echo), play the strongest few as separate chorus **Voices** (the strongest in the centre, the rest fanned out, detuned and delayed), or **Sample** one memory at random, weighted by activation. |
+| **Echo Tone** / **Familiarity > Tone** / **Familiarity > Feedback** | A low-pass on the echo, and routings of familiarity (the strongest activation) to its cutoff and to the feedback amount. |
 | **Activation Power** | 1 = every memory contributes (a blurred "schema"); 9 = only the closest memories answer. |
 | **Similarity** | Hintzman (MINERVA II's normalised dot product) or Cosine. |
 | **Features** / **Ternary Threshold** | Continuous feature values, or classic MINERVA −1/0/+1 values. |

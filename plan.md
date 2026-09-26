@@ -464,6 +464,30 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
   filter or feedback).
 - Recency weighting; feature masks (rhythm-only / timbre-only).
 - Sidechain as alternative cue source; random/frozen probe.
+- **Status:** implemented; awaiting a listen in Live.
+  - Heads: head 1 = main echo; heads 2–3 are Delay (replay head 1's echo
+    from 1 or 2 segments earlier, checked against trace serials) or Iterative
+    (cued by the previous head's echo address: activation-weighted mean
+    features, re-normalised). Per-head level/pan with per-block ramps.
+    Mode Selector: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative 1+2+3, Custom.
+  - Voices: the k strongest traces keep the blend's total level; the
+    strongest sits in the centre, the others fan out alternately with pan,
+    detune (varispeed with linear interpolation) and micro-delay scaled by
+    their distance from the centre. With spread/detune/delay at 0 the
+    output equals the blend.
+  - Sample: one trace drawn with probability proportional to |activation|.
+  - Cue sources: Input, Sidechain (a third feature extractor on the
+    sidechain; the plugin has an optional sidechain bus), Random, Frozen.
+    Random/Frozen skip the cue gate and level tracking.
+  - Recency: activation x exp(-recency x age / 4). Feature focus
+    (Rhythm/Timbre) collapses bands or slots before comparing; it works with
+    progressive prefixes too. (Rolling ignores it.)
+  - Familiarity (smoothed strongest activation) drives echo tone and
+    feedback. The echo tone filter is bypassed exactly at 20 kHz with no
+    modulation.
+  - Defaults are unchanged: all earlier tests, including exact-delay
+    equivalence, still pass. 80 engine tests + plugin state test, clean
+    under ASan/UBSan; heads/voices cost 130–280x realtime.
 
 ### Stage 5: Tape character
 - Varispeed playback for length mismatch (pitch follows tape speed).

@@ -21,7 +21,19 @@ struct RetrievalSettings
     NegativeMode negativeMode = NegativeMode::Subtract;
     Normalization normalization = Normalization::Sum;
     int excludeSlot = -1;   // slot to ignore (self-match off), or -1
+    FeatureFocus focus = FeatureFocus::Full;
+    float recency = 0.0f;   // 0..1: activation *= exp(-recency * age / 4), age in traces stored since
 };
+
+// Feature focus (plan §4): compare only rhythm (loudness over time: each
+// slot's mean over bands, kept in band 0) or only timbre (each band's mean
+// over slots [slotBegin, slotEnd), kept in slot 0). Full returns the input.
+FeatureVector focusVector (const FeatureVector& v, FeatureFocus focus, int slotBegin = 0, int slotEnd = kSlots) noexcept;
+
+// Similarity over slots [slotBegin, slotEnd) under a feature focus.
+float focusedSimilarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind, FeatureFocus focus,
+                         int slotBegin, int slotEnd, bool renormalize) noexcept;
+
 
 struct EchoWeight
 {
@@ -82,6 +94,12 @@ struct OffsetMatch
 // Slides the probe over the trace's frame track and returns the best match
 // that still leaves `minContinuation` frames of the trace to play after it.
 OffsetMatch bestOffset (const WindowProbe& probe, const TraceSlot& trace, int minContinuation) noexcept;
+
+// The echo's own address (MINERVA's echo content): activation-weighted mean
+// of the retrieved traces' features, re-normalised (or re-ternarised). Used to
+// cue iterative heads with the previous echo.
+void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
+                   float ternaryThreshold, FeatureVector& out) noexcept;
 
 struct BestMatch
 {

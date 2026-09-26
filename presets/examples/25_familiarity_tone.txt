@@ -1,0 +1,8 @@
+# Familiarity steers tone: echoes of familiar material are bright, echoes of
+# the unfamiliar are muffled (echo only).
+echo_tone_hz = 5000
+intensity_to_tone = 1
+capacity = 100
+power = 3
+self_match = off
+dry_level_db = -60

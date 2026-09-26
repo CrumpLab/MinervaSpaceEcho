@@ -21,7 +21,8 @@ juce::NormalisableRange<float> rangeFor (const mse::ParamSpec& s)
 MinervaSpaceEchoProcessor::MinervaSpaceEchoProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)),
       parameters (*this, nullptr, "MinervaSpaceEcho", createLayout())
 {
     const auto& specs = mse::paramSpecs();
@@ -87,7 +88,16 @@ bool MinervaSpaceEchoProcessor::isBusesLayoutSupported (const BusesLayout& layou
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
         return false;
-    return layouts.getMainInputChannelSet() == out;
+    if (layouts.getMainInputChannelSet() != out)
+        return false;
+    // Optional sidechain (cues memory when Cue Source = Sidechain).
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto sc = layouts.getChannelSet (true, 1);
+        if (! sc.isDisabled() && sc != juce::AudioChannelSet::mono() && sc != juce::AudioChannelSet::stereo())
+            return false;
+    }
+    return true;
 }
 
 void MinervaSpaceEchoProcessor::applyMemoryConfig()
@@ -207,7 +217,17 @@ void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     fallbackPpq = clock.ppqPosition + buffer.getNumSamples() / getSampleRate() * clock.bpm / 60.0;
 
     engine.setParams (readParams());
-    engine.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples(), clock);
+    auto main = getBusBuffer (buffer, false, 0);
+    const float* const* sidechain = nullptr;
+    int sidechainChannels = 0;
+    if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+    {
+        auto sc = getBusBuffer (buffer, true, 1);
+        sidechainChannels = sc.getNumChannels();
+        sidechain = sidechainChannels > 0 ? sc.getArrayOfReadPointers() : nullptr;
+    }
+    engine.process (main.getArrayOfWritePointers(), main.getNumChannels(), main.getNumSamples(), clock, sidechain,
+                    sidechainChannels);
 
     uiClock.hasTempo.store (clock.hasTempo, std::memory_order_relaxed);
     uiClock.isPlaying.store (clock.isPlaying, std::memory_order_relaxed);

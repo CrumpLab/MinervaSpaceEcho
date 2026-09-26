@@ -1,0 +1,7 @@
+# Mode selector 1+2+3: like the RE-201's three playback heads. Head 1 answers
+# the last bar, heads 2 and 3 replay what head 1 played 1 and 2 bars earlier,
+# panned left and right (echo only).
+mode_selector = 1+2+3
+capacity = 100
+power = 9
+dry_level_db = -60
