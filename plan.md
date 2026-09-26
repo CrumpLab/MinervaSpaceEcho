@@ -434,6 +434,26 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Prediction head (look ahead `Δ` into matching traces).
 - Mode C, rolling-window sliding search on a worker thread (unclocked).
 - CPU profiling; SIMD for similarity if needed.
+- **Status:** implemented; awaiting a listen in Live.
+  - Progressive: re-cued at each of the 16 slot edges with *prefix
+    similarity*. Only the slots heard so far are compared, and stored traces
+    are re-normalised over that range. The previous bar's Segment echo plays
+    until *Progressive Start*.
+  - Rolling: every trace now carries a 20 ms frame track (24 band levels)
+    alongside its 16-slot address; loaded memories get theirs recomputed.
+    Matching uses Pearson correlation over the window (level-independent),
+    with O(1) sliding normalisation.
+  - Frame matches are only good to ±10 ms, which made the echo jitter early
+    and late. The strongest four matches are refined against a 1 ms loudness
+    envelope: echo/input envelope correlation went from 0.37 to 0.93 at lag 0.
+  - Instead of a worker thread, the search runs incrementally on the audio
+    thread with a fixed work budget (~400 multiply-adds per sample). That is
+    deterministic and has no races with memory writes; results are checked
+    against trace serials. Worst block in the example renders: 1.3 ms of a
+    10.7 ms block. Typical cost: Segment ~260x realtime, Progressive ~190x,
+    Rolling 30–100x on one core.
+  - `mse-render` now reports realtime factor and the slowest block. SIMD not
+    needed yet.
 
 ### Stage 4: Heads and chorus
 - Top-k voices with pan spread / detune / micro-delay.

@@ -18,6 +18,8 @@ constexpr float kDeadStrength = 1.0e-3f;        // traces fading below this (-60
 constexpr float kUseDecay = 0.98f;              // per segment, so "least used" favours recent use
 constexpr int kDropoutGrid = 32;                // tape dropouts: each 1/32 of a trace may drop out
 constexpr float kMinMergeWeight = 0.1f;         // consolidation keeps adapting after many merges
+constexpr int kSearchMacsPerSample = 400;       // rolling-search work budget (~0.1 ms per 512-sample block)
+constexpr int kMaxRefinements = 4;              // rolling matches refined to ~1 ms per search
 
 float levelToGain (float db) noexcept
 {
@@ -55,6 +57,9 @@ EchoEngine::EchoEngine()
 {
     retired.reserve (8);
     weights.resize (kMaxCapacity);
+    rollingSerials.resize (kMaxCapacity);
+    envRing.resize (kEnvRing);
+    refineScratch.resize (8192);
     current.entries.resize (kMaxCapacity);
     previous.entries.resize (kMaxCapacity);
 }
@@ -71,6 +76,11 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
 
     features.prepare (sampleRate);
     echoFeatures.prepare (sampleRate);
+    envStep = std::max (1, static_cast<int> (std::lround (sampleRate / 1000.0)));
+    envProduced = 0;
+    envAcc = 0.0;
+    envCount = 0;
+    streamPos = 0;
     for (auto& b : echoBuf)
         b.assign (static_cast<size_t> (maxBlockSize), 0.0f);
     monoBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
@@ -328,6 +338,10 @@ EngineStats EchoEngine::getStats() const noexcept
     s.evictions = stats.evictions.load (std::memory_order_relaxed);
     s.merges = stats.merges.load (std::memory_order_relaxed);
     s.rejections = stats.rejections.load (std::memory_order_relaxed);
+    s.cueUpdates = stats.cueUpdates.load (std::memory_order_relaxed);
+    s.cueLatencyMs = stats.cueLatencyMs.load (std::memory_order_relaxed);
+    s.cueMode = stats.cueMode.load (std::memory_order_relaxed);
+    s.windowTooLong = stats.windowTooLong.load (std::memory_order_relaxed);
     s.lastWrite = static_cast<WriteOutcome> (stats.lastWrite.load (std::memory_order_relaxed));
     s.captureArmed = stats.captureArmed.load (std::memory_order_relaxed);
     return s;
@@ -345,6 +359,9 @@ void EchoEngine::resetPlayback() noexcept
     boundaryPending = false;
     recordEchoOnly = recordEchoToo = false;
     captureArmed = false;
+    rolling.active = false;
+    lastSearchStart = -(int64_t { 1 } << 40);
+    nextSlot = 1;
     dryGain = levelToGain (params.dryLevelDb);
     echoGain = levelToGain (params.echoLevelDb);
     outGain = std::pow (10.0f, params.outputGainDb / 20.0f);
@@ -379,6 +396,7 @@ void EchoEngine::adoptPendingStore() noexcept
     lingerCountdown[static_cast<size_t> (freeLinger)] = 2;
     store = std::move (fresh);
     liveStore.store (store.get(), std::memory_order_release);
+    rolling.active = false; // slot indices refer to the old store
     if (! pendingKeepsTraces)
     {
         segmentCount = static_cast<uint64_t> (store->size());
@@ -458,11 +476,13 @@ void EchoEngine::processCommands() noexcept
                     store->slot (store->storedSlot (i)).clamped = false;
                 break;
             case Command::ClearUnclamped:
+                rolling.active = false;
                 store->clearUnclamped();
                 dropMissingEntries (current);
                 dropMissingEntries (previous);
                 break;
             case Command::ClearAll:
+                rolling.active = false;
                 store->clear();
                 current.count = previous.count = 0;
                 segmentCount = evictionCount = mergeCount = rejectionCount = 0;
@@ -567,6 +587,20 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     dryInc = (levelToGain (params.dryLevelDb) - dryGain) / n;
     echoInc = (levelToGain (params.echoLevelDb) - echoGain) / n;
 
+    // Rolling cue: search memory incrementally, a bounded amount per block.
+    if (params.cueMode == CueMode::Rolling)
+    {
+        const auto interval = static_cast<int64_t> (params.rollingIntervalMs * 0.001 * sampleRate);
+        if (! rolling.active && features.streamPosition() - lastSearchStart >= interval)
+            startRollingSearch();
+        if (rolling.active)
+            continueRollingSearch (static_cast<int64_t> (kSearchMacsPerSample) * numSamples);
+    }
+    else
+    {
+        rolling.active = false;
+    }
+
     int done = 0;
     int64_t nextBoundary = std::min (firstBoundary, recordLimit() - writeIdx);
     while (done < numSamples)
@@ -577,7 +611,16 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
             nextBoundary = std::min (period, recordLimit());
             continue;
         }
-        const int chunk = static_cast<int> (std::min<int64_t> (numSamples - done, nextBoundary));
+        int64_t toEvent = nextBoundary;
+        if (params.cueMode == CueMode::Progressive)
+        {
+            // Progressive cue: re-cue memory at every slot edge of the bar.
+            while (nextSlot < kSlots && slotEdge (nextSlot) <= writeIdx)
+                progressiveUpdate (nextSlot++);
+            if (nextSlot < kSlots)
+                toEvent = std::min (toEvent, slotEdge (nextSlot) - writeIdx);
+        }
+        const int chunk = static_cast<int> (std::min<int64_t> (numSamples - done, toEvent));
         processChunk (io, ioChannels, done, chunk);
         done += chunk;
         nextBoundary -= chunk;
@@ -606,6 +649,10 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     stats.segmentPhase.store (static_cast<float> (std::clamp (writeIdx / std::max (1.0, segNominal), 0.0, 1.0)),
                               std::memory_order_relaxed);
     stats.captureArmed.store (captureArmed, std::memory_order_relaxed);
+    stats.cueMode.store (static_cast<int> (params.cueMode), std::memory_order_relaxed);
+    stats.windowTooLong.store (params.cueMode == CueMode::Rolling
+                                   && params.rollingWindowMs + 2.0f * kFrameSeconds * 1000.0f >= 1000.0 * nominal / sampleRate,
+                               std::memory_order_relaxed);
 }
 
 // ---- memory writes ---------------------------------------------------------------------
@@ -689,6 +736,24 @@ void EchoEngine::mergeInto (TraceSlot& dst, TraceSlot& src) noexcept
     dst.end = std::max (b, e);
     for (size_t j = 0; j < dst.features.size(); ++j)
         dst.features[j] = dst.features[j] * (1.0f - w) + src.features[j] * w;
+
+    // Frame tracks (dB levels) merge the same way over their union.
+    const int fb = std::min (dst.frameBegin, src.frameBegin);
+    const int fe = std::min ({ std::max (dst.frameEnd, src.frameEnd), dst.maxFrames, src.maxFrames });
+    for (int f = fb; f < fe; ++f)
+    {
+        const bool inD = f >= dst.frameBegin && f < dst.frameEnd;
+        const bool inS = f >= src.frameBegin && f < src.frameEnd;
+        float* d = dst.frames + static_cast<size_t> (f) * kBands;
+        const float* sf = src.frames + static_cast<size_t> (f) * kBands;
+        for (int b = 0; b < kBands; ++b)
+            d[b] = (inD && inS) ? d[b] * (1.0f - w) + sf[b] * w : (inD ? d[b] : (inS ? sf[b] : -120.0f));
+    }
+    if (fe > fb)
+    {
+        dst.frameBegin = fb;
+        dst.frameEnd = fe;
+    }
     dst.rms = e > b ? static_cast<float> (std::sqrt (energy / (static_cast<double> (ch) * static_cast<double> (e - b)))) : 0.0f;
     dst.mergeCount += 1;
     dst.strength = 1.0f;
@@ -749,8 +814,8 @@ void EchoEngine::applyDecay() noexcept
     }
 }
 
-WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureVector& feats, float rms, int64_t recorded,
-                                     int generation, bool forced, int& outSlot) noexcept
+WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, const FeatureVector& feats, float rms,
+                                     int64_t recorded, int generation, bool forced, int& outSlot) noexcept
 {
     outSlot = -1;
     if (params.freeze && ! forced)
@@ -777,6 +842,8 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureVector& feats, f
     auto& spare = store->spareSlot (spareIdx);
     spare.begin = std::min (segBegin, spare.maxLen);
     spare.end = std::min (writeIdx, spare.maxLen);
+    spare.frameBegin = fx.sinkBegin();
+    spare.frameEnd = fx.sinkEnd();
     spare.rms = rms;
     spare.generation = generation;
     spare.strength = 1.0f;
@@ -857,7 +924,7 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
                 applyDecay(); // one segment of time has passed
 
             const bool forced = captureArmed;
-            outcome = writeTrace (TraceStore::kInputSpare, probe, cueRms, recorded,
+            outcome = writeTrace (TraceStore::kInputSpare, features, probe, cueRms, recorded,
                                   recordEchoOnly ? segEchoGeneration : 0, forced, selfSlot);
             if (forced && outcome != WriteOutcome::None)
                 captureArmed = false;
@@ -867,94 +934,43 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
                 echoFeatures.finalize (echoProbe, fs);
                 const float echoRms = static_cast<float> (std::sqrt (echoSegEnergy / static_cast<double> (recorded)));
                 int echoSlot = -1;
-                writeTrace (TraceStore::kEchoSpare, echoProbe, echoRms, recorded, segEchoGeneration, false, echoSlot);
+                writeTrace (TraceStore::kEchoSpare, echoFeatures, echoProbe, echoRms, recorded, segEchoGeneration,
+                            false, echoSlot);
             }
         }
         lastWrite = outcome;
 
-        // Cue gate: a (near-)silent segment evokes nothing, even though its
-        // level-independent features could still match loud memories.
-        const bool gated = params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb;
-
-        RetrievalSettings rs;
-        rs.similarity = params.similarity;
-        rs.power = params.power;
-        rs.negativeMode = params.negativeMode;
-        rs.normalization = params.normalization;
-        rs.excludeSlot = params.selfMatch ? -1 : selfSlot;
-        const auto result = gated ? RetrievalResult {} : retrieve (probe, *store, rs, weights.data());
-
+        // In Rolling mode the echo is driven by the search, not by bar lines.
+        if (params.cueMode != CueMode::Rolling)
+        {
+            // Cue gate: a (near-)silent segment evokes nothing, even though its
+            // level-independent features could still match loud memories.
+            const bool gated = params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb;
+            auto rs = retrievalSettings();
+            rs.excludeSlot = params.selfMatch ? -1 : selfSlot;
+            const auto result = gated ? RetrievalResult {} : retrieve (probe, *store, rs, weights.data());
+            if (! held)
+                noteUse (result);
+            installEcho (result, cueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
+        }
         if (! held)
-        {
-            for (int i = 0; i < result.numWeights; ++i)
-                store->slot (weights[static_cast<size_t> (i)].slot).useCount += std::abs (weights[static_cast<size_t> (i)].activation);
             endMutation();
-        }
-
-        // Level tracking: scale the echo so its level follows the cue's, the way
-        // a tape repeat follows what was played. Memory picks *what* returns;
-        // the input decides *how loud*. (Capacity 1: the factor is exactly 1.)
-        float tracking = 1.0f;
-        if (params.levelTracking > 0.0f && result.numWeights > 0)
-        {
-            // Activation-weighted mean level of what was retrieved. Using the
-            // mean (not the weighted sum) leaves the normalisation mode's own
-            // loudness behaviour (e.g. Familiarity) intact.
-            double weighted = 0.0, total = 0.0;
-            for (int i = 0; i < result.numWeights; ++i)
-            {
-                const auto& w = weights[static_cast<size_t> (i)];
-                weighted += std::abs (w.weight) * store->slot (w.slot).rms;
-                total += std::abs (w.weight);
-            }
-            const double memoryRms = total > 0.0 ? weighted / total : 0.0;
-            const float ratio = memoryRms > 0.0 ? std::min (kMaxTrackingGain, static_cast<float> (cueRms / memoryRms)) : 0.0f;
-            tracking = std::pow (ratio, params.levelTracking);
-        }
-
-        // The current echo keeps playing briefly while fading out.
-        std::swap (previous.entries, current.entries);
-        previous.count = current.count;
-        previous.pos = current.pos;
-        previous.rampPos = 0;
-        previous.rampLen = fadeSamples;
-        previous.fadingOut = true;
-        if (fadeSamples == 0)
-            previous.count = 0;
-
-        const uint64_t now = store->currentSerial();
-        current.count = result.numWeights;
-        for (int i = 0; i < result.numWeights; ++i)
-        {
-            const auto& w = weights[static_cast<size_t> (i)];
-            const auto& s = store->slot (w.slot);
-            float coeff = 1.0f;
-            if (params.wearTone > 0.0f)
-            {
-                // Older traces play back duller, like worn tape.
-                const double age = static_cast<double> (now - std::min (now, s.serial));
-                const double fc = std::clamp (18000.0 * std::exp (-params.wearTone * age / 8.0), 200.0, 0.45 * sampleRate);
-                coeff = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
-            }
-            current.entries[static_cast<size_t> (i)] = { { s.audio[0], s.audio[1] }, s.begin, s.end,
-                                                          w.weight * tracking, w.slot, coeff, { 0.0f, 0.0f } };
-        }
-        current.fadingOut = false;
-
-        stats.intensity.store (result.intensity, std::memory_order_relaxed);
-        stats.maxActivation.store (result.maxAbs, std::memory_order_relaxed);
-        stats.activeTraces.store (result.numWeights, std::memory_order_relaxed);
     }
-
-    current.pos = newBegin;
-    current.rampPos = 0;
-    current.rampLen = newBegin > 0 ? fadeSamples : 0;
+    else if (params.cueMode != CueMode::Rolling)
+    {
+        current.pos = newBegin;
+        current.rampPos = 0;
+        current.rampLen = newBegin > 0 ? fadeSamples : 0;
+    }
 
     segBegin = writeIdx = newBegin;
     segEnergy = echoSegEnergy = 0.0;
     segNominal = newNominal;
-    features.beginSegment (segNominal);
-    echoFeatures.beginSegment (segNominal);
+    auto& spare = store->spareSlot (TraceStore::kInputSpare);
+    auto& echoSpare = store->spareSlot (TraceStore::kEchoSpare);
+    features.beginSegment (segNominal, spare.frames, spare.maxFrames);
+    echoFeatures.beginSegment (segNominal, echoSpare.frames, echoSpare.maxFrames);
+    nextSlot = static_cast<int> (static_cast<double> (newBegin) * kSlots / std::max (1.0, segNominal)) + 1;
 
     // What does the new segment record? (Echo re-encoding, plan §5.5.)
     int maxGen = 0;
@@ -965,6 +981,305 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
     recordEchoToo = params.recordSource == RecordSource::InputAndEcho && current.count > 0;
 
     publishStats();
+}
+
+RetrievalSettings EchoEngine::retrievalSettings() const noexcept
+{
+    RetrievalSettings rs;
+    rs.similarity = params.similarity;
+    rs.power = params.power;
+    rs.negativeMode = params.negativeMode;
+    rs.normalization = params.normalization;
+    return rs;
+}
+
+void EchoEngine::noteUse (const RetrievalResult& result) noexcept
+{
+    for (int i = 0; i < result.numWeights; ++i)
+        store->slot (weights[static_cast<size_t> (i)].slot).useCount += std::abs (weights[static_cast<size_t> (i)].activation);
+}
+
+void EchoEngine::installEcho (const RetrievalResult& result, float cueRms, int64_t pos,
+                              int64_t fadeOutLen, int64_t fadeInLen) noexcept
+{
+    // Level tracking: scale the echo so its level follows the cue's, the way
+    // a tape repeat follows what was played. Memory picks *what* returns;
+    // the input decides *how loud*. (Capacity 1: the factor is exactly 1.)
+    float tracking = 1.0f;
+    if (params.levelTracking > 0.0f && result.numWeights > 0)
+    {
+        // Activation-weighted mean level of what was retrieved. Using the
+        // mean (not the weighted sum) leaves the normalisation mode's own
+        // loudness behaviour (e.g. Familiarity) intact.
+        double weighted = 0.0, total = 0.0;
+        for (int i = 0; i < result.numWeights; ++i)
+        {
+            const auto& w = weights[static_cast<size_t> (i)];
+            weighted += std::abs (w.weight) * store->slot (w.slot).rms;
+            total += std::abs (w.weight);
+        }
+        const double memoryRms = total > 0.0 ? weighted / total : 0.0;
+        const float ratio = memoryRms > 0.0 ? std::min (kMaxTrackingGain, static_cast<float> (cueRms / memoryRms)) : 0.0f;
+        tracking = std::pow (ratio, params.levelTracking);
+    }
+
+    // The current echo keeps playing briefly while fading out.
+    std::swap (previous.entries, current.entries);
+    previous.count = current.count;
+    previous.pos = current.pos;
+    previous.rampPos = 0;
+    previous.rampLen = fadeOutLen;
+    previous.fadingOut = true;
+    if (fadeOutLen == 0)
+        previous.count = 0;
+
+    const auto lookahead = static_cast<int64_t> (std::llround (params.lookaheadMs * 0.001 * sampleRate));
+    const uint64_t now = store->currentSerial();
+    current.count = result.numWeights;
+    for (int i = 0; i < result.numWeights; ++i)
+    {
+        const auto& w = weights[static_cast<size_t> (i)];
+        const auto& s = store->slot (w.slot);
+        float coeff = 1.0f;
+        if (params.wearTone > 0.0f)
+        {
+            // Older traces play back duller, like worn tape.
+            const double age = static_cast<double> (now - std::min (now, s.serial));
+            const double fc = std::clamp (18000.0 * std::exp (-params.wearTone * age / 8.0), 200.0, 0.45 * sampleRate);
+            coeff = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
+        }
+        current.entries[static_cast<size_t> (i)] = { { s.audio[0], s.audio[1] }, s.begin, s.end, w.offset + lookahead,
+                                                      w.weight * tracking, w.slot, coeff, { 0.0f, 0.0f } };
+    }
+    current.pos = pos;
+    current.rampPos = 0;
+    current.rampLen = fadeInLen;
+    current.fadingOut = false;
+
+    ++cueUpdates;
+    stats.intensity.store (result.intensity, std::memory_order_relaxed);
+    stats.maxActivation.store (result.maxAbs, std::memory_order_relaxed);
+    stats.activeTraces.store (result.numWeights, std::memory_order_relaxed);
+}
+
+// ---- live cueing (plan §3 Modes B and C) --------------------------------------------------
+
+int64_t EchoEngine::slotEdge (int k) const noexcept
+{
+    return static_cast<int64_t> (std::ceil (static_cast<double> (k) * segNominal / kSlots));
+}
+
+void EchoEngine::progressiveUpdate (int k) noexcept
+{
+    const int64_t recorded = writeIdx - segBegin;
+    if (recorded <= 0 || k < params.progressiveStart)
+        return;
+
+    // The bar so far, compared with the same stretch of every stored trace.
+    features.finalize (partialProbe, { params.featureMode, params.ternaryThreshold });
+    const float cueRms = static_cast<float> (std::sqrt (segEnergy / static_cast<double> (recorded)));
+    const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
+    if (params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb)
+    {
+        installEcho ({}, cueRms, writeIdx, smooth, smooth);
+        return;
+    }
+
+    const int firstSlot = static_cast<int> (static_cast<double> (segBegin) * kSlots / std::max (1.0, segNominal));
+    const bool renormalize = params.featureMode == FeatureMode::Continuous;
+    int n = 0;
+    for (int i = 0; i < store->size(); ++i)
+    {
+        const int slot = store->storedSlot (i);
+        const float sim = prefixSimilarity (partialProbe, store->slot (slot).features, params.similarity,
+                                            firstSlot, k, renormalize);
+        weights[static_cast<size_t> (n++)] = { slot, sim, 0.0f, 0 };
+    }
+    const auto result = finishRetrieval (*store, retrievalSettings(), weights.data(), n);
+    if (holdRequests.load (std::memory_order_acquire) == 0)
+    {
+        beginMutation();
+        noteUse (result);
+        endMutation();
+    }
+
+    // Memories play in step with the bar being played (position writeIdx).
+    installEcho (result, cueRms, writeIdx, smooth, smooth);
+}
+
+int64_t EchoEngine::refineOffset (const TraceSlot& trace, int64_t offset, int64_t probeEnd, int windowSamples) const noexcept
+{
+    // Live window in envelope points: [a, b) covers stream [a*E, b*E).
+    const int64_t E = envStep;
+    const int64_t a = (probeEnd - windowSamples + E - 1) / E;
+    const int64_t b = probeEnd / E;
+    const int n = static_cast<int> (b - a);
+    if (n < 8 || b > envProduced || envProduced - a > kEnvRing)
+        return offset;
+
+    float live[2048];
+    const int count = std::min (n, 2048);
+    double ls = 0.0, lsq = 0.0;
+    for (int k = 0; k < count; ++k)
+    {
+        live[k] = envRing[static_cast<size_t> ((a + k) % kEnvRing)];
+        ls += live[k];
+        lsq += static_cast<double> (live[k]) * live[k];
+    }
+    const double lvar = lsq - ls * ls / count;
+    if (lvar <= 1.0e-12)
+        return offset;
+
+    // The trace sample that lines up with stream sample a*E, as first estimated.
+    const int64_t x0 = offset - (probeEnd - a * E);
+    const int64_t hop = frameHop (sampleRate);
+    const int64_t sub = std::max<int64_t> (1, E / 2); // search step: half an envelope point
+    const int lags = static_cast<int> (2 * hop / sub) + 1;
+    const int64_t base = x0 - (lags / 2) * sub;
+
+    // Trace energy in half-point steps, computed once; each lag then pairs
+    // sub-points (j + 2k, j + 2k + 1) into one envelope point.
+    const int subPoints = std::min (lags + 2 * count + 1, static_cast<int> (refineScratch.size()));
+    const int ch = store->numChannels();
+    for (int m = 0; m < subPoints; ++m)
+    {
+        double acc = 0.0;
+        const int64_t t0 = std::max (base + m * sub, trace.begin);
+        const int64_t t1 = std::min (base + (m + 1) * sub, trace.end);
+        for (int64_t t = t0; t < t1; ++t)
+        {
+            float mono = 0.0f;
+            for (int c = 0; c < ch; ++c)
+                mono += trace.audio[c][t];
+            mono /= static_cast<float> (ch);
+            acc += static_cast<double> (mono) * mono;
+        }
+        refineScratch[static_cast<size_t> (m)] = static_cast<float> (acc);
+    }
+
+    int64_t bestX = x0;
+    double bestR = -2.0;
+    for (int j = 0; j < lags && j + 2 * count < subPoints; ++j)
+    {
+        double ts = 0.0, tsq = 0.0, cross = 0.0;
+        for (int k = 0; k < count; ++k)
+        {
+            const double v = std::sqrt ((refineScratch[static_cast<size_t> (j + 2 * k)]
+                                         + refineScratch[static_cast<size_t> (j + 2 * k + 1)]) / static_cast<double> (2 * sub));
+            ts += v;
+            tsq += v * v;
+            cross += v * live[k];
+        }
+        const double tvar = tsq - ts * ts / count;
+        if (tvar <= 1.0e-12)
+            continue;
+        const double r = (cross - ls * ts / count) / std::sqrt (lvar * tvar);
+        if (r > bestR)
+        {
+            bestR = r;
+            bestX = base + j * sub;
+        }
+    }
+    return bestX + (probeEnd - a * E);
+}
+
+void EchoEngine::startRollingSearch() noexcept
+{
+    const int W = std::clamp (static_cast<int> (std::lround (params.rollingWindowMs * 0.001 / kFrameSeconds)), 3,
+                              kMaxWindowFrames);
+    const int64_t produced = features.framesProduced();
+    if (produced < W || W > kFrameRing)
+        return;
+
+    const float* frames[kMaxWindowFrames];
+    double power = 0.0;
+    for (int f = 0; f < W; ++f)
+    {
+        const int64_t idx = produced - W + f;
+        frames[f] = features.ringFrame (idx);
+        power += features.ringEnergy (idx);
+    }
+    lastSearchStart = features.streamPosition();
+    rolling.cueRms = static_cast<float> (std::sqrt (power / W));
+    rolling.probeEnd = features.ringEnd (produced - 1);
+
+    const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
+    if ((params.cueGateDb > kCueGateOffDb && toDb (rolling.cueRms) < params.cueGateDb)
+        || ! prepareWindowProbe (frames, W, rolling.probe))
+    {
+        if (current.count > 0)
+            installEcho ({}, rolling.cueRms, 0, smooth, smooth); // silence: let the echo fade
+        return;
+    }
+    rolling.active = true;
+    rolling.position = 0;
+    rolling.count = 0;
+}
+
+void EchoEngine::continueRollingSearch (int64_t budget) noexcept
+{
+    const int W = rolling.probe.frames;
+    const int hop = features.hop();
+    const int newest = store->size() - 1;
+    while (rolling.position < store->size() && budget > 0)
+    {
+        const int pos = rolling.position++;
+        if (! params.selfMatch && pos == newest)
+            continue; // the trace just stored: matching it would only echo what was just played
+        const int slot = store->storedSlot (pos);
+        const auto& trace = store->slot (slot);
+        budget -= static_cast<int64_t> (std::max (0, trace.frameEnd - trace.frameBegin)) * W * kBands;
+        const auto m = bestOffset (rolling.probe, trace, 1);
+        if (m.offset < 0)
+            continue;
+        // Offset = the trace sample that lines up with the end of the probe.
+        weights[static_cast<size_t> (rolling.count)] = { slot, m.similarity, 0.0f,
+                                                         static_cast<int64_t> (m.offset + W) * hop };
+        rollingSerials[static_cast<size_t> (rolling.count)] = trace.serial;
+        ++rolling.count;
+    }
+    if (rolling.position < store->size())
+        return; // continue next block
+
+    // Search complete. Drop results whose trace changed meanwhile, then align
+    // every match with "now": the probe ended (now - probeEnd) samples ago.
+    const int64_t elapsed = features.streamPosition() - rolling.probeEnd;
+    int n = 0;
+    for (int i = 0; i < rolling.count; ++i)
+    {
+        auto w = weights[static_cast<size_t> (i)];
+        if (store->positionOf (w.slot) < 0 || store->slot (w.slot).serial != rollingSerials[static_cast<size_t> (i)])
+            continue;
+        w.offset += elapsed;
+        weights[static_cast<size_t> (n++)] = w;
+    }
+    auto result = finishRetrieval (*store, retrievalSettings(), weights.data(), n);
+
+    // Frame matches are only accurate to half a frame (~10 ms); refine the
+    // strongest ones against a 1 ms loudness envelope so echoes land in time.
+    const float strongest = result.maxAbs;
+    int refined = 0;
+    for (int i = 0; i < result.numWeights && refined < kMaxRefinements; ++i)
+    {
+        auto& w = weights[static_cast<size_t> (i)];
+        if (std::abs (w.activation) < 0.1f * strongest)
+            continue;
+        const int64_t aligned = w.offset - elapsed; // trace sample aligned with the probe's end
+        w.offset = refineOffset (store->slot (w.slot), aligned, rolling.probeEnd, rolling.probe.frames * hop) + elapsed;
+        ++refined;
+    }
+
+    if (holdRequests.load (std::memory_order_acquire) == 0)
+    {
+        beginMutation();
+        noteUse (result);
+        endMutation();
+    }
+    const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
+    installEcho (result, rolling.cueRms, 0, smooth, smooth);
+    stats.cueLatencyMs.store (static_cast<float> (1000.0 * static_cast<double> (elapsed) / sampleRate),
+                              std::memory_order_relaxed);
+    rolling.active = false;
 }
 
 // ---- playback and recording ------------------------------------------------------------------
@@ -978,8 +1293,9 @@ void EchoEngine::accumulate (Playlist& pl, int ioChannels, int len) noexcept
         {
             auto& e = pl.entries[static_cast<size_t> (k)];
             const int64_t fade = std::min (fadeSamples, (e.end - e.begin) / 4);
-            const int64_t start = std::max<int64_t> (0, e.begin - pl.pos);
-            const int64_t stop = std::min<int64_t> (len, e.end - pl.pos);
+            const int64_t base = pl.pos + e.offset; // trace position read at i = 0
+            const int64_t start = std::max<int64_t> (0, e.begin - base);
+            const int64_t stop = std::min<int64_t> (len, e.end - base);
             for (int c = 0; c < ioChannels; ++c)
             {
                 const float* src = e.audio[std::min (c, storeCh - 1)];
@@ -987,7 +1303,7 @@ void EchoEngine::accumulate (Playlist& pl, int ioChannels, int len) noexcept
                 float z = e.z[c];
                 for (int64_t i = start; i < stop; ++i)
                 {
-                    const int64_t t = pl.pos + i;
+                    const int64_t t = base + i;
                     float g = e.weight;
                     if (fade > 0)
                         g *= std::min ({ 1.0f, static_cast<float> (t - e.begin + 1) / fade,
@@ -1054,6 +1370,15 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         mono *= invCh;
         monoBuf[static_cast<size_t> (i)] = mono;
         segEnergy += static_cast<double> (mono) * mono;
+        envAcc += static_cast<double> (mono) * mono;
+        if (++envCount == envStep)
+        {
+            envRing[static_cast<size_t> (envProduced % kEnvRing)] = static_cast<float> (std::sqrt (envAcc / envStep));
+            ++envProduced;
+            envAcc = 0.0;
+            envCount = 0;
+        }
+        ++streamPos;
         if (recordEchoToo)
         {
             echoMono *= invCh;
@@ -1080,6 +1405,7 @@ void EchoEngine::publishStats() noexcept
     stats.evictions.store (evictionCount, std::memory_order_relaxed);
     stats.merges.store (mergeCount, std::memory_order_relaxed);
     stats.rejections.store (rejectionCount, std::memory_order_relaxed);
+    stats.cueUpdates.store (cueUpdates, std::memory_order_relaxed);
     stats.lastWrite.store (static_cast<int> (lastWrite), std::memory_order_relaxed);
     stats.captureArmed.store (captureArmed, std::memory_order_relaxed);
 }

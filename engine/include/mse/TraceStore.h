@@ -29,6 +29,11 @@ struct TraceSlot
     int64_t begin = 0;
     int64_t end = 0;
 
+    float* frames = nullptr;  // frame track: maxFrames x kBands band levels (dB)
+    int maxFrames = 0;
+    int frameBegin = 0;       // valid frames: [frameBegin, frameEnd)
+    int frameEnd = 0;
+
     uint64_t serial = 0;      // store order; age in segments = store serial - serial
     float rms = 0.0f;         // mono RMS of the recorded audio
     float strength = 1.0f;    // decays over time; multiplies the trace's activation
@@ -41,6 +46,7 @@ struct TraceSlot
     void resetMeta() noexcept
     {
         begin = end = 0;
+        frameBegin = frameEnd = 0;
         serial = 0;
         rms = 0.0f;
         strength = 1.0f;
@@ -72,6 +78,7 @@ public:
     int numChannels() const noexcept { return channels; }
     double sampleRate() const noexcept { return rate; }
     int64_t slotSamples() const noexcept { return slotLen; }
+    int framesPerSlot() const noexcept { return slotFrames; }
     const MemoryConfig& config() const noexcept { return cfg; }
 
     int size() const noexcept { return static_cast<int> (order.size()); }
@@ -111,14 +118,18 @@ public:
     int appendTrace (const TraceSlot& meta, const float* const* audio, int numChannels, int64_t length);
 
 private:
-    void swapBuffers (TraceSlot& a, std::unique_ptr<float[]>& bufA, TraceSlot& b, std::unique_ptr<float[]>& bufB) noexcept;
+    void swapBuffers (int mine, TraceStore& other, int theirs) noexcept;
+    // Copies metadata/features from src into slot `to`, keeping to's buffers.
+    void copyMeta (int to, const TraceSlot& src) noexcept;
 
     MemoryConfig cfg;
     double rate;
     int cap;
     int channels;
     int64_t slotLen;
-    std::vector<std::unique_ptr<float[]>> buffers; // one per slot
+    int slotFrames;
+    std::vector<std::unique_ptr<float[]>> buffers;      // audio, one per slot
+    std::vector<std::unique_ptr<float[]>> frameBuffers; // frame tracks, one per slot
     std::vector<TraceSlot> slots;
     std::vector<int> order;      // stored slot indices, oldest first
     std::vector<int> freeSlots;  // stack

@@ -17,6 +17,7 @@ enum class FullPolicy { Oldest, Random, LeastUsed, Weakest, MergeSimilar, Reject
 enum class WriteMode { Auto, Manual };
 enum class NoveltyMode { Off, StoreNovel, StoreFamiliar };
 enum class RecordSource { Input, Echo, InputAndEcho };
+enum class CueMode { Segment, Progressive, Rolling };
 
 constexpr float kLevelOffDb = -60.0f;
 constexpr float kGateOffDb = -100.0f;
@@ -59,6 +60,14 @@ struct EngineParams
     float decayFadeDb = 0.0f;                          // per segment: strength lost
     float wearTone = 0.0f;                             // older traces play back duller
 
+    // cueing (plan §3)
+    CueMode cueMode = CueMode::Segment;
+    int progressiveStart = 2;                          // Progressive: slots (of 16) heard before the live cue takes over
+    float rollingWindowMs = 250.0f;                    // Rolling: length of the live cue
+    float rollingIntervalMs = 100.0f;                  // Rolling: how often memory is searched
+    float lookaheadMs = 0.0f;                          // play memory this far ahead (prediction)
+    float cueSmoothingMs = 40.0f;                      // crossfade when a live cue changes the echo
+
     // retrieval
     float power = 3.0f;
     Similarity similarity = Similarity::Hintzman;
@@ -99,6 +108,7 @@ enum ParamIndex
     kWriteMode, kCapture, kWriteGateDb, kNoveltyMode, kNoveltyThreshold, kWriteProbability, kRecordSource,
     kClampIncoming, kClampBudget, kClampProtects,
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
+    kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
     kPower, kSimilarity, kFeatureMode, kTernaryThreshold, kSelfMatch, kCueGateDb, kNegativeMode,
     kNormalization, kLevelTracking,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,

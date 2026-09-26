@@ -18,13 +18,20 @@ TraceStore::TraceStore (const MemoryConfig& config, double sampleRate, int numCh
     const double byLength = config.maxTraceSeconds * sampleRate;
     slotLen = std::max<int64_t> (64, static_cast<int64_t> (std::min (byBudget, byLength)));
 
+    slotFrames = static_cast<int> (slotLen / frameHop (sampleRate)) + 2;
+
     buffers.resize (static_cast<size_t> (numSlots));
+    frameBuffers.resize (static_cast<size_t> (numSlots));
     slots.resize (static_cast<size_t> (numSlots));
     const auto perSlot = static_cast<size_t> (slotLen) * static_cast<size_t> (channels);
+    const auto framesPerSlotFloats = static_cast<size_t> (slotFrames) * kBands;
     for (size_t s = 0; s < slots.size(); ++s)
     {
         buffers[s].reset (new float[perSlot]); // deliberately uninitialised
+        frameBuffers[s].reset (new float[framesPerSlotFloats]);
         slots[s].maxLen = slotLen;
+        slots[s].frames = frameBuffers[s].get();
+        slots[s].maxFrames = slotFrames;
         for (int c = 0; c < channels; ++c)
             slots[s].audio[c] = buffers[s].get() + static_cast<size_t> (c) * static_cast<size_t> (slotLen);
     }
@@ -91,12 +98,32 @@ void TraceStore::removeAt (int position) noexcept
     freeSlots.push_back (s);
 }
 
-void TraceStore::swapBuffers (TraceSlot& a, std::unique_ptr<float[]>& bufA,
-                              TraceSlot& b, std::unique_ptr<float[]>& bufB) noexcept
+void TraceStore::swapBuffers (int mine, TraceStore& other, int theirs) noexcept
 {
-    std::swap (bufA, bufB);
+    auto& a = slots[static_cast<size_t> (mine)];
+    auto& b = other.slots[static_cast<size_t> (theirs)];
+    std::swap (buffers[static_cast<size_t> (mine)], other.buffers[static_cast<size_t> (theirs)]);
+    std::swap (frameBuffers[static_cast<size_t> (mine)], other.frameBuffers[static_cast<size_t> (theirs)]);
     std::swap (a.audio, b.audio);
     std::swap (a.maxLen, b.maxLen);
+    std::swap (a.frames, b.frames);
+    std::swap (a.maxFrames, b.maxFrames);
+}
+
+void TraceStore::copyMeta (int to, const TraceSlot& src) noexcept
+{
+    auto& dst = slots[static_cast<size_t> (to)];
+    auto* a0 = dst.audio[0];
+    auto* a1 = dst.audio[1];
+    const auto maxLen = dst.maxLen;
+    auto* frames = dst.frames;
+    const auto maxFrames = dst.maxFrames;
+    dst = src;
+    dst.audio[0] = a0;
+    dst.audio[1] = a1;
+    dst.maxLen = maxLen;
+    dst.frames = frames;
+    dst.maxFrames = maxFrames;
 }
 
 void TraceStore::adoptFrom (TraceStore& old, bool keepTraces) noexcept
@@ -108,8 +135,7 @@ void TraceStore::adoptFrom (TraceStore& old, bool keepTraces) noexcept
         auto& theirs = old.slots[static_cast<size_t> (old.spares[w])];
         if (theirs.maxLen >= 1 && channels == old.channels)
         {
-            swapBuffers (mine, buffers[static_cast<size_t> (spares[w])],
-                         theirs, old.buffers[static_cast<size_t> (old.spares[w])]);
+            swapBuffers (spares[w], old, old.spares[w]);
             mine.begin = theirs.begin;
             mine.end = theirs.end;
         }
@@ -144,15 +170,8 @@ void TraceStore::adoptFrom (TraceStore& old, bool keepTraces) noexcept
 
         const int to = freeSlots.back();
         freeSlots.pop_back();
-        auto& dst = slots[static_cast<size_t> (to)];
-        swapBuffers (dst, buffers[static_cast<size_t> (to)], src, old.buffers[static_cast<size_t> (from)]);
-        auto* audio0 = dst.audio[0];
-        auto* audio1 = dst.audio[1];
-        const auto maxLen = dst.maxLen;
-        dst = src;                 // metadata + features
-        dst.audio[0] = audio0;     // ...but keep the swapped-in buffer
-        dst.audio[1] = audio1;
-        dst.maxLen = maxLen;
+        swapBuffers (to, old, from); // the trace's buffers move here
+        copyMeta (to, src);          // metadata + features
         order.push_back (to);
     }
 }
@@ -163,20 +182,23 @@ int TraceStore::appendTrace (const TraceSlot& meta, const float* const* audio, i
         return -1;
     const int to = freeSlots.back();
     freeSlots.pop_back();
+    copyMeta (to, meta);
     auto& dst = slots[static_cast<size_t> (to)];
-    auto* a0 = dst.audio[0];
-    auto* a1 = dst.audio[1];
-    const auto maxLen = dst.maxLen;
-    dst = meta;
-    dst.audio[0] = a0;
-    dst.audio[1] = a1;
-    dst.maxLen = maxLen;
 
-    const int64_t n = std::min (length, maxLen);
+    const int64_t n = std::min (length, dst.maxLen);
     dst.begin = std::min (dst.begin, n);
     dst.end = std::clamp (dst.end, dst.begin, n);
     for (int c = 0; c < channels; ++c)
         std::memcpy (dst.audio[c], audio[std::min (c, numCh - 1)], static_cast<size_t> (n) * sizeof (float));
+
+    // The frame track is derived from the audio.
+    std::vector<float> mono (static_cast<size_t> (dst.end), 0.0f);
+    for (int c = 0; c < channels; ++c)
+        for (int64_t t = dst.begin; t < dst.end; ++t)
+            mono[static_cast<size_t> (t)] += dst.audio[c][t] / static_cast<float> (channels);
+    FeatureExtractor::computeFrames (mono.data(), dst.begin, dst.end, rate, dst.frames, dst.maxFrames,
+                                     dst.frameBegin, dst.frameEnd);
+
     if (dst.serial == 0)
         dst.serial = nextSerial;
     nextSerial = std::max (nextSerial, dst.serial + 1);

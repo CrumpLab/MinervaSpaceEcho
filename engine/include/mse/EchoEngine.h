@@ -44,6 +44,10 @@ struct EngineStats
     uint64_t evictions = 0;
     uint64_t merges = 0;
     uint64_t rejections = 0;
+    uint64_t cueUpdates = 0;      // times the echo was re-cued
+    float cueLatencyMs = 0.0f;    // Rolling: age of the cue when its echo started
+    int cueMode = 0;              // CueMode in use
+    bool windowTooLong = false;   // Rolling: traces are too short to search with this window
     WriteOutcome lastWrite = WriteOutcome::None;
     bool captureArmed = false;
 };
@@ -113,6 +117,7 @@ private:
     {
         const float* audio[2];
         int64_t begin, end;
+        int64_t offset;    // read position = playlist pos + offset
         float weight;
         int slot;
         float toneCoeff;   // wear-tone one-pole coefficient (1 = bypass)
@@ -135,8 +140,16 @@ private:
     double nominalLength (const HostClock& clock) const noexcept;
     int64_t recordLimit() const noexcept;
     void boundary (int64_t newBegin, double newNominal) noexcept;
-    WriteOutcome writeTrace (int spare, const FeatureVector& feats, float rms, int64_t recorded,
-                             int generation, bool forced, int& outSlot) noexcept;
+    WriteOutcome writeTrace (int spare, const FeatureExtractor& fx, const FeatureVector& feats, float rms,
+                             int64_t recorded, int generation, bool forced, int& outSlot) noexcept;
+    RetrievalSettings retrievalSettings() const noexcept;
+    void noteUse (const RetrievalResult& result) noexcept;
+    void installEcho (const RetrievalResult& result, float cueRms, int64_t pos, int64_t fadeOutLen, int64_t fadeInLen) noexcept;
+    int64_t slotEdge (int k) const noexcept;
+    void progressiveUpdate (int k) noexcept;
+    void startRollingSearch() noexcept;
+    void continueRollingSearch (int64_t budget) noexcept;
+    int64_t refineOffset (const TraceSlot& trace, int64_t offset, int64_t probeEnd, int windowSamples) const noexcept; // audio thread only
     int chooseVictim() noexcept;
     void mergeInto (TraceSlot& dst, TraceSlot& src) noexcept;
     void applyDropouts (TraceSlot& s) noexcept;
@@ -186,7 +199,32 @@ private:
     std::atomic<uint32_t> queueHead { 0 }, queueTail { 0 };
 
     FeatureExtractor features, echoFeatures;
-    FeatureVector probe {}, echoProbe {};
+    FeatureVector probe {}, echoProbe {}, partialProbe {};
+
+    // live cueing
+    int nextSlot = 1;                        // Progressive: next slot edge to act on
+    struct RollingState
+    {
+        bool active = false;
+        WindowProbe probe;
+        int64_t probeEnd = 0;                // stream sample where the probe ended
+        float cueRms = 0.0f;
+        int position = 0;                    // next storage position to search
+        int count = 0;                       // results so far (in `weights`)
+    } rolling;
+    std::vector<uint64_t> rollingSerials;    // serial of each result's trace, to detect changes
+
+    // 1 ms loudness envelope of the recorded stream, for sub-frame alignment.
+    static constexpr int kEnvRing = 4096;
+    std::vector<float> envRing;
+    mutable std::vector<float> refineScratch;
+    int envStep = 48;                        // samples per envelope point
+    int64_t envProduced = 0;                 // points produced; point k covers stream [k*envStep, (k+1)*envStep)
+    double envAcc = 0.0;
+    int envCount = 0;
+    int64_t streamPos = 0;                   // samples recorded since prepare()
+    int64_t lastSearchStart = -(int64_t { 1 } << 40);
+    uint64_t cueUpdates = 0;
     std::vector<EchoWeight> weights;
     Playlist current, previous;
     std::vector<float> echoBuf[kMaxChannels];
@@ -221,7 +259,10 @@ private:
         std::atomic<int> tracesStored { 0 }, capacity { 0 }, clamped { 0 }, activeTraces { 0 }, lastWrite { 0 };
         std::atomic<double> slotSeconds { 0.0 }, traceSeconds { 0.0 };
         std::atomic<float> segmentPhase { 0.0f }, intensity { 0.0f }, maxActivation { 0.0f };
-        std::atomic<uint64_t> segments { 0 }, evictions { 0 }, merges { 0 }, rejections { 0 };
+        std::atomic<uint64_t> segments { 0 }, evictions { 0 }, merges { 0 }, rejections { 0 }, cueUpdates { 0 };
+        std::atomic<float> cueLatencyMs { 0.0f };
+        std::atomic<int> cueMode { 0 };
+        std::atomic<bool> windowTooLong { false };
         std::atomic<bool> captureArmed { false };
     } stats;
 };

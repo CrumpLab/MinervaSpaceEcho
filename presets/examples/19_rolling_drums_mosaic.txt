@@ -1,0 +1,10 @@
+# Rolling cue on drums with a short 120 ms window, self-match off:
+# a mosaic of earlier hits that follows the groove (echo only).
+cue_mode = Rolling
+rolling_window_ms = 120
+rolling_interval_ms = 60
+cue_smoothing_ms = 15
+self_match = off
+capacity = 100
+power = 6
+dry_level_db = -60

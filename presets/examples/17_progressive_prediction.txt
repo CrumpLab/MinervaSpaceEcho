@@ -1,0 +1,7 @@
+# Progressive cue with prediction: memory plays an eighth note (250 ms)
+# ahead of you, so you hear what came next last time (echo only).
+cue_mode = Progressive
+lookahead_ms = 250
+capacity = 100
+power = 9
+dry_level_db = -60

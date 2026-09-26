@@ -8,13 +8,15 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 2 (memory management).** The plugin cuts the input into traces
+**Status: Stage 3 (live cueing).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
 Capacity = 1 it is exactly a 1-bar tape delay. Stage 2 adds control over what
 memory keeps: freezing, write gates, clamping, full-memory policies,
 consolidation, forgetting, echo re-encoding, and saving and loading memory.
+Stage 3 lets the live input cue memory *while it plays*: progressively within
+the bar, or with no bar grid at all (rolling).
 
 ## How it behaves
 
@@ -26,6 +28,20 @@ At every trace boundary (e.g. each bar line):
 2. The same bar is the **cue** (probe). Each stored trace's similarity *S* to
    the cue becomes an activation *A = sign(S)·|S|^power*.
 3. The **echo** heard during the next bar is Σ *A·trace audio*, normalised.
+
+That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
+
+- **Progressive:** from the *Progressive Start* slot (of 16 per bar) on, memory
+  is re-cued at every slot with the part of the bar heard so far, compared
+  with the same stretch of each stored bar. Bars that began like this one
+  play along in step with you, and the echo sharpens as the bar unfolds.
+  Before that slot, the previous bar's Segment echo plays.
+- **Rolling:** no bar grid. Every *Rolling Interval*, the last *Rolling Window*
+  of input is searched for at every position inside every stored trace
+  (20 ms frames, then refined to about 1 ms). Memory then plays what
+  *followed* the best matches, aligned with now. The search is spread over
+  audio blocks with a fixed work budget, so it never spikes the CPU. Traces
+  must be longer than the window (the status line warns if not).
 
 ## Parameters
 
@@ -45,6 +61,11 @@ At every trace boundary (e.g. each bar line):
 | **Tape Dropouts** | At recording, each 1/32 of a trace may drop out. |
 | **Forgetting / Segment** / **Fading / Segment** | Each bar, stored traces lose features (weaker recall) and strength (weaker activation). Traces faded below −60 dB are forgotten. |
 | **Wear Tone** | Older traces play back duller. |
+| **Cue Mode** | Segment (echo of the last bar, like a delay), Progressive (memory follows the bar as it unfolds), or Rolling (unclocked search). |
+| **Progressive Start** | Slot (of 16) from which the progressive cue takes over. |
+| **Rolling Window** / **Rolling Interval** | Length of the live cue, and how often memory is searched. |
+| **Prediction** | Play memory this far ahead of the current position: hear what came next last time. |
+| **Cue Smoothing** | Crossfade whenever a live cue changes the echo. |
 | **Activation Power** | 1 = every memory contributes (a blurred "schema"); 9 = only the closest memories answer. |
 | **Similarity** | Hintzman (MINERVA II's normalised dot product) or Cosine. |
 | **Features** / **Ternary Threshold** | Continuous feature values, or classic MINERVA −1/0/+1 values. |

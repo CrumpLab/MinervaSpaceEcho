@@ -18,6 +18,21 @@ const char* outcomeText (mse::WriteOutcome o)
     return "-";
 }
 
+juce::String cueText (const mse::EngineStats& st)
+{
+    switch (static_cast<mse::CueMode> (st.cueMode))
+    {
+        case mse::CueMode::Progressive:
+            return "   cue: progressive";
+        case mse::CueMode::Rolling:
+            return st.windowTooLong ? juce::String ("   cue: rolling - traces must be longer than the window!")
+                                    : "   cue: rolling (" + juce::String (st.cueLatencyMs, 0) + " ms behind)";
+        case mse::CueMode::Segment:
+            break;
+    }
+    return {};
+}
+
 juce::File defaultMemoryFolder()
 {
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory)
@@ -165,7 +180,8 @@ void MinervaSpaceEchoEditor::timerCallback()
                              + "   " + juce::String (clock.timeSigNumerator) + "/" + juce::String (clock.timeSigDenominator)
                              + "   bar " + juce::String (bar) + (clock.isPlaying ? "  (playing)" : "  (stopped)")
                              + "   evicted " + juce::String (static_cast<juce::int64> (st.evictions))
-                             + ", merged " + juce::String (static_cast<juce::int64> (st.merges)),
+                             + ", merged " + juce::String (static_cast<juce::int64> (st.merges))
+                             + cueText (st),
                          juce::dontSendNotification);
 
     if (messageTicks > 0 && --messageTicks == 0)

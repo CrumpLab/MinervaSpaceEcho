@@ -14,6 +14,7 @@ const char* const kPolicyChoices[] = { "Oldest", "Random", "Least Used", "Weakes
 const char* const kWriteModeChoices[] = { "Auto", "Manual" };
 const char* const kNoveltyChoices[] = { "Off", "Store Novel", "Store Familiar" };
 const char* const kSourceChoices[] = { "Input", "Echo", "Input + Echo" };
+const char* const kCueModeChoices[] = { "Segment", "Progressive", "Rolling" };
 const char* const kSimilarityChoices[] = { "Hintzman", "Cosine" };
 const char* const kFeatureChoices[] = { "Continuous", "Ternary" };
 const char* const kNegativeChoices[] = { "Subtract", "Ignore", "Absolute" };
@@ -57,6 +58,13 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "decay_forget",       "Forgetting / Segment",  ParamType::Float,  0,    0.2f,   0,     0,    "",       NOCHOICE,                      true },
     { "decay_fade_db",      "Fading / Segment",      ParamType::Float,  0,    6,      0,     0,    "dB",     NOCHOICE,                      true },
     { "wear_tone",          "Wear Tone",             ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    // cueing
+    { "cue_mode",           "Cue Mode",              ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kCueModeChoices),      true },
+    { "progressive_start",  "Progressive Start",     ParamType::Int,    1,    15,     2,     0,    "slots",  NOCHOICE,                      true },
+    { "rolling_window_ms",  "Rolling Window",        ParamType::Float,  60,   2000,   250,   400,  "ms",     NOCHOICE,                      true },
+    { "rolling_interval_ms","Rolling Interval",      ParamType::Float,  20,   1000,   100,   150,  "ms",     NOCHOICE,                      true },
+    { "lookahead_ms",       "Prediction",            ParamType::Float,  0,    2000,   0,     250,  "ms",     NOCHOICE,                      true },
+    { "cue_smoothing_ms",   "Cue Smoothing",         ParamType::Float,  1,    500,    40,    60,   "ms",     NOCHOICE,                      true },
     // retrieval
     { "power",              "Activation Power",      ParamType::Float,  1,    9,      3,     0,    "",       NOCHOICE,                      true },
     { "similarity",         "Similarity",            ParamType::Choice, 0,    1,      0,     0,    "",       CHOICE (kSimilarityChoices),   true },
@@ -149,6 +157,13 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.decayForget = v (kDecayForget);
     p.decayFadeDb = v (kDecayFadeDb);
     p.wearTone = v (kWearTone);
+
+    p.cueMode = static_cast<CueMode> (idx (kCueMode));
+    p.progressiveStart = idx (kProgressiveStart);
+    p.rollingWindowMs = v (kRollingWindowMs);
+    p.rollingIntervalMs = v (kRollingIntervalMs);
+    p.lookaheadMs = v (kLookaheadMs);
+    p.cueSmoothingMs = v (kCueSmoothingMs);
 
     p.power = v (kPower);
     p.similarity = static_cast<Similarity> (idx (kSimilarity));

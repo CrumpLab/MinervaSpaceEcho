@@ -12,6 +12,11 @@ constexpr double kDynamicRangeDb = 60.0;   // bands more than this below the lou
 constexpr double kMinStdDb = 3.0;          // keeps near-flat segments from blowing up noise
 } // namespace
 
+int frameHop (double sampleRate) noexcept
+{
+    return std::max (16, static_cast<int> (std::lround (kFrameSeconds * sampleRate)));
+}
+
 void FeatureExtractor::prepare (double sampleRate)
 {
     const double fMin = 60.0;
@@ -36,14 +41,54 @@ void FeatureExtractor::prepare (double sampleRate)
         f.a2 = static_cast<float> ((1.0 - alpha) / a0);
         f.z1 = f.z2 = 0.0f;
     }
+    frameHopSamples = frameHop (sampleRate);
+    produced = 0;
+    streamSamples = 0;
+    frameCount = 0;
     beginSegment (sampleRate);
 }
 
-void FeatureExtractor::beginSegment (double nominalLength) noexcept
+void FeatureExtractor::beginSegment (double nominalLength, float* frameSink, int sinkFrames) noexcept
 {
     energy.fill (0.0);
     counts.fill (0);
     slotScale = kSlots / std::max (1.0, nominalLength);
+
+    // A partial frame from the previous segment still feeds the live ring.
+    if (frameCount >= frameHopSamples / 2)
+        emitFrame (false);
+    frameAcc.fill (0.0);
+    framePower = 0.0;
+    frameCount = 0;
+    sink = frameSink;
+    sinkCapacity = frameSink ? sinkFrames : 0;
+    sinkFirst = sinkLast = 0;
+}
+
+void FeatureExtractor::emitFrame (bool toSink) noexcept
+{
+    const double n = std::max (1, frameCount);
+    float* dst = ring.data() + static_cast<size_t> (produced % kFrameRing) * kBands;
+    for (size_t b = 0; b < static_cast<size_t> (kBands); ++b)
+        dst[b] = static_cast<float> (10.0 * std::log10 (frameAcc[b] / n + 1.0e-12));
+    ringPower[static_cast<size_t> (produced % kFrameRing)] = static_cast<float> (framePower / n);
+    ringEndSample[static_cast<size_t> (produced % kFrameRing)] = streamSamples;
+    ++produced;
+
+    if (toSink && sink != nullptr)
+    {
+        const auto f = static_cast<int> (frameStartPos / frameHopSamples);
+        if (f >= 0 && f < sinkCapacity)
+        {
+            std::copy (dst, dst + kBands, sink + static_cast<size_t> (f) * kBands);
+            if (sinkLast == 0)
+                sinkFirst = f;
+            sinkLast = f + 1;
+        }
+    }
+    frameAcc.fill (0.0);
+    framePower = 0.0;
+    frameCount = 0;
 }
 
 void FeatureExtractor::push (const float* mono, int n, int64_t startIndex) noexcept
@@ -53,6 +98,8 @@ void FeatureExtractor::push (const float* mono, int n, int64_t startIndex) noexc
         const auto slot = static_cast<size_t> (std::min<int64_t> (
             kSlots - 1, static_cast<int64_t> (static_cast<double> (startIndex + i) * slotScale)));
         const float x = mono[i];
+        if (frameCount == 0)
+            frameStartPos = startIndex + i;
         double* e = energy.data() + slot * kBands;
         for (size_t b = 0; b < static_cast<size_t> (kBands); ++b)
         {
@@ -61,10 +108,28 @@ void FeatureExtractor::push (const float* mono, int n, int64_t startIndex) noexc
             const float y = f.b0 * x + f.z1;
             f.z1 = -f.a1 * y + f.z2;
             f.z2 = f.b2 * x - f.a2 * y;
-            e[b] += static_cast<double> (y) * y;
+            const double p = static_cast<double> (y) * y;
+            e[b] += p;
+            frameAcc[b] += p;
         }
         ++counts[slot];
+        framePower += static_cast<double> (x) * x;
+        ++streamSamples;
+        if (++frameCount == frameHopSamples)
+            emitFrame (true);
     }
+}
+
+void FeatureExtractor::computeFrames (const float* mono, int64_t begin, int64_t end, double sampleRate,
+                                      float* sinkFrames, int capacity, int& framesBegin, int& framesEnd)
+{
+    FeatureExtractor fx;
+    fx.prepare (sampleRate);
+    fx.beginSegment (static_cast<double> (std::max<int64_t> (1, end)), sinkFrames, capacity);
+    if (end > begin)
+        fx.push (mono + begin, static_cast<int> (end - begin), begin);
+    framesBegin = fx.sinkBegin();
+    framesEnd = fx.sinkEnd();
 }
 
 bool FeatureExtractor::finalize (FeatureVector& out, const FeatureSettings& settings) const noexcept

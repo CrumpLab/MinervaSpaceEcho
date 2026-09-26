@@ -1,0 +1,8 @@
+# Rolling cue: no bar grid. Every 100 ms the last 250 ms of input is searched
+# for inside every stored bar, and memory continues from the best matches (echo only).
+cue_mode = Rolling
+rolling_window_ms = 250
+rolling_interval_ms = 100
+capacity = 100
+power = 9
+dry_level_db = -60

@@ -6,6 +6,7 @@
 #include "mse/EchoEngine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
@@ -114,6 +115,8 @@ int main (int argc, char** argv)
         const double samplesPerBar = 4.0 * 60.0 / bpm * audio.sampleRate;
         std::stable_sort (timed.begin(), timed.end(), [] (const auto& a, const auto& b) { return a.bar < b.bar; });
         size_t nextTimed = 0;
+        using Clock = std::chrono::steady_clock;
+        double processSeconds = 0.0, worstBlock = 0.0;
         for (int pos = 0; pos < total; pos += blockSize)
         {
             // Timed preset lines take effect at the first block at or after their bar.
@@ -136,7 +139,11 @@ int main (int argc, char** argv)
             for (int c = 0; c < numCh; ++c)
                 ptrs[static_cast<size_t> (c)] = audio.channels[static_cast<size_t> (c)].data() + pos;
             clock.ppqPosition = pos / audio.sampleRate * bpm / 60.0;
+            const auto t0 = Clock::now();
             engine.process (ptrs.data(), numCh, n, clock);
+            const double dt = std::chrono::duration<double> (Clock::now() - t0).count();
+            processSeconds += dt;
+            worstBlock = std::max (worstBlock, dt);
         }
 
         mse::writeWav (positional[1], audio, format);
@@ -158,6 +165,9 @@ int main (int argc, char** argv)
                      mse::versionString(), st.tracesStored, st.capacity,
                      static_cast<unsigned long long> (st.segments), st.traceSeconds, st.activeTraces,
                      static_cast<double> (st.intensity));
+        std::printf ("  cpu: %.0fx realtime, slowest block %.3f ms (block lasts %.2f ms)\n",
+                     total / audio.sampleRate / std::max (1e-9, processSeconds), worstBlock * 1000.0,
+                     1000.0 * blockSize / audio.sampleRate);
     }
     catch (const std::exception& e)
     {

@@ -1,0 +1,6 @@
+# Progressive cue: from the 2nd sixteenth of each bar, memory is re-cued with
+# the bar so far. Earlier bars that began the same way play along in step.
+cue_mode = Progressive
+capacity = 100
+power = 9
+dry_level_db = -60

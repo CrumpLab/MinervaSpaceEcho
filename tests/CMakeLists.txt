@@ -12,6 +12,7 @@ add_executable(mse_tests
     PresetTests.cpp
     ModelTests.cpp
     MemoryTests.cpp
+    CueTests.cpp
 )
 target_link_libraries(mse_tests PRIVATE mse_tools_common Catch2::Catch2WithMain)
 
