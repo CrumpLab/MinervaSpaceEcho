@@ -155,6 +155,7 @@ void EchoEngine::setMemoryConfig (const MemoryConfig& requested)
     double sr = 0.0;
     int ch = 0;
     std::unique_ptr<TraceStore> pendingLoadStore;
+    bool pendingWasLoad = false;
     {
         std::lock_guard lock (handoffMutex);
         if (cfg == requestedConfig)
@@ -164,8 +165,12 @@ void EchoEngine::setMemoryConfig (const MemoryConfig& requested)
             return;
         sr = sampleRate;
         ch = numChannels;
-        if (pendingStore && ! pendingKeepsTraces)
-            pendingLoadStore = std::move (pendingStore); // a load not yet picked up: re-fit it
+        if (pendingStore && (! pendingKeepsTraces || pendingStore->size() > 0))
+        {
+            // A load or import not yet picked up: re-fit it.
+            pendingLoadStore = std::move (pendingStore);
+            pendingWasLoad = ! pendingKeepsTraces;
+        }
     }
 
     auto fresh = std::make_unique<TraceStore> (cfg, sr, ch); // allocate outside the lock
@@ -173,7 +178,7 @@ void EchoEngine::setMemoryConfig (const MemoryConfig& requested)
     if (pendingLoadStore)
     {
         fresh->adoptFrom (*pendingLoadStore, true);
-        keep = false;
+        keep = ! pendingWasLoad;
     }
     std::unique_ptr<TraceStore> replaced;
     {
@@ -277,6 +282,97 @@ void EchoEngine::loadSnapshot (const MemorySnapshot& snapshot)
     }
 }
 
+void EchoEngine::importTraces (const MemorySnapshot& additions)
+{
+    if (additions.traces.empty())
+        return;
+    MemoryConfig cfg;
+    double sr;
+    int ch;
+    {
+        std::lock_guard lock (handoffMutex);
+        if (! prepared)
+        {
+            if (! pendingLoad)
+            {
+                pendingLoad = std::make_unique<MemorySnapshot> (additions);
+                return;
+            }
+            // Append to the memory waiting for prepare().
+            auto extra = additions;
+            resampleSnapshot (extra, pendingLoad->sampleRate);
+            uint64_t serial = 0;
+            for (const auto& t : pendingLoad->traces)
+                serial = std::max (serial, t.serial);
+            for (auto& t : extra.traces)
+            {
+                t.serial = ++serial;
+                pendingLoad->traces.push_back (std::move (t));
+            }
+            return;
+        }
+        cfg = requestedConfig;
+        sr = sampleRate;
+        ch = numChannels;
+    }
+    auto fresh = buildStoreFrom (additions, cfg, sr, ch);
+    std::unique_ptr<TraceStore> replaced;
+    {
+        std::lock_guard lock (handoffMutex);
+        if (pendingStore && pendingKeepsTraces && pendingStore->size() > 0)
+            fresh->adoptFrom (*pendingStore, true); // an import still waiting: keep it (as older)
+        else if (pendingStore && ! pendingKeepsTraces)
+        {
+            // A load still waiting: import on top of it and keep it a load.
+            auto combined = std::make_unique<TraceStore> (cfg, sr, ch);
+            combined->adoptFrom (*pendingStore, true);
+            for (int i = 0; i < fresh->size(); ++i)
+            {
+                const auto& t = fresh->slot (fresh->storedSlot (i));
+                auto meta = t;
+                meta.serial = 0;
+                const float* audio[2] = { t.audio[0], t.audio[1] };
+                combined->appendTrace (meta, audio, fresh->numChannels(), t.end);
+            }
+            replaced = std::move (pendingStore);
+            pendingStore = std::move (combined);
+            hasPending.store (true, std::memory_order_release);
+            return;
+        }
+        replaced = std::move (pendingStore);
+        pendingStore = std::move (fresh);
+        pendingKeepsTraces = true;
+        hasPending.store (true, std::memory_order_release);
+    }
+}
+
+void EchoEngine::enableMemoryView()
+{
+    if (viewEnabled.load())
+        return;
+    for (auto& b : viewBuffers)
+    {
+        b = std::make_unique<MemoryView>();
+        const size_t slots = kMaxCapacity + TraceStore::kSpares;
+        b->rows.resize (kMaxCapacity);
+        b->rowSlot.assign (kMaxCapacity, 0);
+        b->thumbs.assign (slots * kFeatureSize, 0);
+        b->thumbKeys.assign (slots, ~uint64_t { 0 });
+    }
+    viewActivation.assign (kMaxCapacity + TraceStore::kSpares, 0.0f);
+    viewPlay.assign (kMaxCapacity + TraceStore::kSpares, {});
+    viewEnabled.store (true, std::memory_order_release);
+}
+
+const MemoryView* EchoEngine::readMemoryView() noexcept
+{
+    if (! viewEnabled.load (std::memory_order_acquire))
+        return nullptr;
+    if (viewMiddle.load (std::memory_order_acquire) & kViewDirty)
+        viewFront = viewMiddle.exchange (viewFront, std::memory_order_acq_rel) & 3;
+    return viewBuffers[static_cast<size_t> (viewFront)].get();
+}
+
 bool EchoEngine::takeSnapshot (MemorySnapshot& out)
 {
     {
@@ -341,13 +437,19 @@ bool EchoEngine::takeSnapshot (MemorySnapshot& out)
 
 // ==== any thread ====================================================================
 
-void EchoEngine::sendCommand (Command c) noexcept
+void EchoEngine::sendCommand (Command c, uint64_t traceSerial) noexcept
 {
     const uint32_t tail = queueTail.load (std::memory_order_relaxed);
     if (tail - queueHead.load (std::memory_order_acquire) >= static_cast<uint32_t> (kQueueSize))
         return; // queue full: drop
-    commandQueue[tail % kQueueSize].store (static_cast<int> (c), std::memory_order_relaxed);
+    commandQueue[tail % kQueueSize].store (static_cast<uint64_t> (c) | (traceSerial << 8), std::memory_order_relaxed);
     queueTail.store (tail + 1, std::memory_order_release);
+}
+
+void EchoEngine::sendCommandFromAudioThread (Command c, uint64_t traceSerial) noexcept
+{
+    if (localCommandCount < static_cast<int> (localCommands.size()))
+        localCommands[static_cast<size_t> (localCommandCount++)] = static_cast<uint64_t> (c) | (traceSerial << 8);
 }
 
 EngineStats EchoEngine::getStats() const noexcept
@@ -442,6 +544,7 @@ void EchoEngine::adoptPendingStore() noexcept
     lingerCountdown[static_cast<size_t> (freeLinger)] = 2;
     store = std::move (fresh);
     liveStore.store (store.get(), std::memory_order_release);
+    ++viewStoreEpoch;       // slot numbering changed: redraw every thumbnail
     rolling.active = false; // slot indices refer to the old store
     for (auto& past : history)
         past.count = 0;
@@ -454,6 +557,7 @@ void EchoEngine::adoptPendingStore() noexcept
     }
     endMutation();
     publishStats();
+    viewCountdown = 0;
 }
 
 void EchoEngine::stepLingering() noexcept
@@ -489,68 +593,130 @@ void EchoEngine::processCommands() noexcept
     if (holdRequests.load (std::memory_order_acquire) > 0)
         return; // memory must not change while a snapshot is being taken
 
+    // Memory actions as parameters (rising edges).
+    static constexpr Command kTriggerCommands[EngineParams::kNumTriggers] = {
+        Command::ClampLast, Command::ClampAll, Command::UnclampAll, Command::ClearUnclamped, Command::ClearAll
+    };
+    bool fired = false;
+    for (int t = 0; t < EngineParams::kNumTriggers; ++t)
+    {
+        if (params.trigger[t] && ! lastTrigger[t])
+        {
+            if (! fired)
+                beginMutation();
+            fired = true;
+            runCommand (kTriggerCommands[t], 0);
+        }
+        lastTrigger[t] = params.trigger[t];
+    }
+
     uint32_t head = queueHead.load (std::memory_order_relaxed);
     const uint32_t tail = queueTail.load (std::memory_order_acquire);
-    if (head == tail)
+    if (head == tail && ! fired && localCommandCount == 0)
         return;
 
-    beginMutation();
+    if (! fired)
+        beginMutation();
+    for (int i = 0; i < localCommandCount; ++i)
+        runCommand (static_cast<Command> (localCommands[static_cast<size_t> (i)] & 0xff), localCommands[static_cast<size_t> (i)] >> 8);
+    localCommandCount = 0;
     for (; head != tail; ++head)
     {
-        const auto c = static_cast<Command> (commandQueue[head % kQueueSize].load (std::memory_order_relaxed));
-        switch (c)
-        {
-            case Command::Capture:
-                captureArmed = true;
-                break;
-            case Command::ClampLast:
-                if (store->size() > 0 && store->clampedCount() < maxClamped())
-                    store->slot (store->storedSlot (store->size() - 1)).clamped = true;
-                break;
-            case Command::ClampAll:
-            {
-                int budget = maxClamped() - store->clampedCount();
-                for (int i = store->size() - 1; i >= 0 && budget > 0; --i)
-                {
-                    auto& s = store->slot (store->storedSlot (i));
-                    if (! s.clamped)
-                    {
-                        s.clamped = true;
-                        --budget;
-                    }
-                }
-                break;
-            }
-            case Command::UnclampAll:
-                for (int i = 0; i < store->size(); ++i)
-                    store->slot (store->storedSlot (i)).clamped = false;
-                break;
-            case Command::ClearUnclamped:
-                rolling.active = false;
-                store->clearUnclamped();
-                for (int h = 0; h < kNumHeads; ++h)
-                {
-                    dropMissingEntries (headCurrent[static_cast<size_t> (h)]);
-                    dropMissingEntries (headPrevious[static_cast<size_t> (h)]);
-                }
-                for (auto& past : history)
-                    past.count = 0;
-                break;
-            case Command::ClearAll:
-                rolling.active = false;
-                store->clear();
-                clearHeads();
-                segmentCount = evictionCount = mergeCount = rejectionCount = 0;
-                writeIdx = segBegin = 0; // drop the half-recorded segment too
-                segEnergy = echoSegEnergy = 0.0;
-                needResync = true;
-                boundaryPending = false;
-                break;
-        }
+        const uint64_t packed = commandQueue[head % kQueueSize].load (std::memory_order_relaxed);
+        runCommand (static_cast<Command> (packed & 0xff), packed >> 8);
     }
     queueHead.store (head, std::memory_order_release);
     endMutation();
     publishStats();
+    viewCountdown = 0; // show the change right away
+}
+
+void EchoEngine::deleteTrace (int position) noexcept
+{
+    rolling.active = false;
+    store->removeAt (position);
+    for (int h = 0; h < kNumHeads; ++h)
+    {
+        dropMissingEntries (headCurrent[static_cast<size_t> (h)]);
+        dropMissingEntries (headPrevious[static_cast<size_t> (h)]);
+        headWeightCount[static_cast<size_t> (h)] = 0;
+    }
+}
+
+void EchoEngine::runCommand (Command c, uint64_t arg) noexcept
+{
+    switch (c)
+    {
+        case Command::Capture:
+            captureArmed = true;
+            break;
+        case Command::ClampLast:
+            if (store->size() > 0 && store->clampedCount() < maxClamped())
+                store->slot (store->storedSlot (store->size() - 1)).clamped = true;
+            break;
+        case Command::ClampAll:
+        {
+            int budget = maxClamped() - store->clampedCount();
+            for (int i = store->size() - 1; i >= 0 && budget > 0; --i)
+            {
+                auto& s = store->slot (store->storedSlot (i));
+                if (! s.clamped)
+                {
+                    s.clamped = true;
+                    --budget;
+                }
+            }
+            break;
+        }
+        case Command::UnclampAll:
+            for (int i = 0; i < store->size(); ++i)
+                store->slot (store->storedSlot (i)).clamped = false;
+            break;
+        case Command::ClearUnclamped:
+            rolling.active = false;
+            store->clearUnclamped();
+            for (int h = 0; h < kNumHeads; ++h)
+            {
+                dropMissingEntries (headCurrent[static_cast<size_t> (h)]);
+                dropMissingEntries (headPrevious[static_cast<size_t> (h)]);
+            }
+            for (auto& past : history)
+                past.count = 0;
+            break;
+        case Command::ClearAll:
+            rolling.active = false;
+            store->clear();
+            clearHeads();
+            segmentCount = evictionCount = mergeCount = rejectionCount = 0;
+            writeIdx = segBegin = 0; // drop the half-recorded segment too
+            segEnergy = echoSegEnergy = 0.0;
+            needResync = true;
+            boundaryPending = false;
+            break;
+        case Command::ClampTrace:
+        case Command::UnclampTrace:
+        case Command::DeleteTrace:
+        {
+            const int pos = store->positionOfSerial (arg);
+            if (pos < 0 || arg == 0)
+                break;
+            auto& s = store->slot (store->storedSlot (pos));
+            if (c == Command::ClampTrace)
+            {
+                if (! s.clamped && store->clampedCount() < maxClamped())
+                    s.clamped = true;
+            }
+            else if (c == Command::UnclampTrace)
+            {
+                s.clamped = false;
+            }
+            else
+            {
+                deleteTrace (pos);
+            }
+            break;
+        }
+    }
 }
 
 double EchoEngine::nominalLength (const HostClock& clock) const noexcept
@@ -740,6 +906,13 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
         outGain = std::abs (g - target) < 1.0e-6f ? target : g;
     }
 
+    viewCountdown -= numSamples;
+    if (viewCountdown <= 0)
+    {
+        viewCountdown = static_cast<int64_t> (sampleRate / 30.0);
+        publishView();
+    }
+
     stats.traceSeconds.store (nominal / sampleRate, std::memory_order_relaxed);
     stats.segmentPhase.store (static_cast<float> (std::clamp (writeIdx / std::max (1.0, segNominal), 0.0, 1.0)),
                               std::memory_order_relaxed);
@@ -831,6 +1004,7 @@ void EchoEngine::mergeInto (TraceSlot& dst, TraceSlot& src) noexcept
     dst.end = std::max (b, e);
     for (size_t j = 0; j < dst.features.size(); ++j)
         dst.features[j] = dst.features[j] * (1.0f - w) + src.features[j] * w;
+    ++dst.featureVersion;
 
     // Frame tracks (dB levels) merge the same way over their union.
     const int fb = std::min (dst.frameBegin, src.frameBegin);
@@ -901,9 +1075,12 @@ void EchoEngine::applyDecay() noexcept
             continue;
         s.strength *= fade;
         if (params.decayForget > 0.0f)
+        {
             for (auto& f : s.features)
                 if (f != 0.0f && random01() < params.decayForget)
                     f = 0.0f;
+            ++s.featureVersion;
+        }
         if (s.strength < kDeadStrength)
             store->removeAt (i); // faded out completely: forgotten
     }
@@ -1957,6 +2134,81 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
     if (recordEchoToo)
         echoFeatures.push (echoMonoBuf.data(), len, writeIdx);
     writeIdx += len;
+}
+
+void EchoEngine::publishView() noexcept
+{
+    if (! viewEnabled.load (std::memory_order_acquire) || store == nullptr)
+        return;
+    auto& v = *viewBuffers[static_cast<size_t> (viewBack)];
+    const int slots = std::min (store->capacity() + TraceStore::kSpares, static_cast<int> (viewActivation.size()));
+
+    // Per-slot activation (main head) and what is playing on each head.
+    std::fill (viewActivation.begin(), viewActivation.begin() + slots, 0.0f);
+    std::fill (viewPlay.begin(), viewPlay.begin() + slots, std::array<float, kNumHeads> {});
+    for (int i = 0; i < headWeightCount[0]; ++i)
+    {
+        const auto& w = headWeights[0][static_cast<size_t> (i)];
+        if (w.slot >= 0 && w.slot < slots)
+            viewActivation[static_cast<size_t> (w.slot)] = w.activation;
+    }
+    for (int h = 0; h < kNumHeads; ++h)
+    {
+        const auto& pl = headCurrent[static_cast<size_t> (h)];
+        const float headGain = headGainNow[h];
+        for (int i = 0; i < pl.count; ++i)
+        {
+            const auto& e = pl.entries[static_cast<size_t> (i)];
+            // Entries can still point into a store that was just replaced.
+            if (e.slot < 0 || e.slot >= slots || store->slot (e.slot).audio[0] != e.audio[0])
+                continue;
+            viewPlay[static_cast<size_t> (e.slot)][static_cast<size_t> (h)] += std::abs (e.weight) * headGain;
+        }
+    }
+
+    const int n = std::min (store->size(), static_cast<int> (v.rows.size()));
+    const uint64_t now = store->currentSerial();
+    const double sr = store->sampleRate();
+    for (int i = 0; i < n; ++i)
+    {
+        const int slot = store->storedSlot (i);
+        const auto& s = store->slot (slot);
+        auto& r = v.rows[static_cast<size_t> (i)];
+        r.serial = s.serial;
+        r.activation = viewActivation[static_cast<size_t> (slot)];
+        for (int h = 0; h < kNumHeads; ++h)
+            r.play[h] = viewPlay[static_cast<size_t> (slot)][static_cast<size_t> (h)];
+        r.rms = s.rms;
+        r.strength = s.strength;
+        r.useCount = s.useCount;
+        r.seconds = static_cast<float> (static_cast<double> (s.end - s.begin) / sr);
+        r.age = static_cast<int> (now > s.serial ? now - s.serial - 1 : 0);
+        r.generation = s.generation;
+        r.mergeCount = s.mergeCount;
+        r.clamped = s.clamped;
+
+        v.rowSlot[static_cast<size_t> (i)] = slot;
+        const uint64_t key = (s.serial << 20) ^ s.featureVersion ^ (static_cast<uint64_t> (viewStoreEpoch) << 58);
+        if (slot < slots && v.thumbKeys[static_cast<size_t> (slot)] != key)
+        {
+            v.thumbKeys[static_cast<size_t> (slot)] = key;
+            auto* t = v.thumbs.data() + static_cast<size_t> (slot) * kFeatureSize;
+            for (int j = 0; j < kFeatureSize; ++j)
+            {
+                const float q = std::clamp (s.features[static_cast<size_t> (j)] * MemoryView::kThumbScale, -127.0f, 127.0f);
+                t[j] = static_cast<int8_t> (q >= 0.0f ? q + 0.5f : q - 0.5f);
+            }
+        }
+    }
+    v.count = n;
+    v.capacity = store->capacity();
+    v.clampLimit = maxClamped();
+    v.intensity = stats.intensity.load (std::memory_order_relaxed);
+    v.maxActivation = stats.maxActivation.load (std::memory_order_relaxed);
+    v.heard = probe;
+    v.version = ++viewVersion;
+
+    viewBack = viewMiddle.exchange (viewBack | kViewDirty, std::memory_order_acq_rel) & 3;
 }
 
 void EchoEngine::publishStats() noexcept

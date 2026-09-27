@@ -41,6 +41,13 @@ jobs:
       - name: Render example presets
         run: scripts/render_examples.sh build renders
 
+      - name: Editor snapshots
+        run: |
+          mkdir -p ui
+          xvfb-run -a build/plugin/mse-ui-snapshot ui/editor.png 1040 760 "07 Three Heads" 9
+          xvfb-run -a build/plugin/mse-ui-snapshot ui/editor-small.png 860 620 "04 Deja Vu" 3
+          xvfb-run -a build/plugin/mse-ui-snapshot ui/editor-grains.png 1280 900 "20 Grain Cloud"
+
       - name: pluginval (VST3)
         run: |
           curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
@@ -52,6 +59,12 @@ jobs:
         with:
           name: example-renders
           path: renders
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: editor-snapshots
+          path: ui
           retention-days: 14
 
   macos:

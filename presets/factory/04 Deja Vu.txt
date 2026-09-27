@@ -1,0 +1,6 @@
+# Self-match off and a sharp activation power: the bar you just played can't
+# answer itself, so memory replies with the closest earlier bar.
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -4

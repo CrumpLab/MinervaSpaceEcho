@@ -1,0 +1,5 @@
+# The basic MINERVA echo: each bar recalls a blend of the stored bars most
+# like it, mixed under the dry signal.
+capacity = 100
+power = 3
+echo_level_db = -6

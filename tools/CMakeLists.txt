@@ -1,9 +1,8 @@
 # Shared helpers (WAV I/O, presets) and the deterministic test-signal library.
 add_library(mse_tools_common STATIC
-    common/Preset.cpp
     testgen/TestSignals.cpp
 )
-target_include_directories(mse_tools_common PUBLIC common testgen)
+target_include_directories(mse_tools_common PUBLIC testgen)
 target_link_libraries(mse_tools_common PUBLIC mse::engine)
 
 if(MSE_BUILD_TOOLS)

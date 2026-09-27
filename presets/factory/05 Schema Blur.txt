@@ -1,0 +1,7 @@
+# Power 1 blends everything memory holds into a "schema" of what you've been
+# playing. Spectral blending keeps the blur from comb-filtering.
+capacity = 100
+power = 1
+blend_domain = Spectral
+spectral_voices = 16
+echo_level_db = -6

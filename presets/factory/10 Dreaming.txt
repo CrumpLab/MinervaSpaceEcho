@@ -1,0 +1,7 @@
+# One memory at a time, drawn by chance (weighted by activation). Switch Cue
+# Source to Random and memory keeps dreaming without you.
+playback = Sample
+capacity = 100
+power = 3
+self_match = off
+echo_level_db = -6

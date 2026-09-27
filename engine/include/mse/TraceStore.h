@@ -42,6 +42,7 @@ struct TraceSlot
     int generation = 0;       // 0 = heard; n = echo of generation n-1 material
     int mergeCount = 1;       // how many segments were consolidated into this trace
     bool clamped = false;     // clamped traces are never replaced (or decayed, optionally)
+    uint32_t featureVersion = 0; // bumped whenever `features` change after storing (UI thumbnails)
     FeatureVector features {};
 
     void resetMeta() noexcept
@@ -56,6 +57,7 @@ struct TraceSlot
         generation = 0;
         mergeCount = 1;
         clamped = false;
+        featureVersion = 0;
     }
 };
 
@@ -97,6 +99,7 @@ public:
     TraceSlot& spareSlot (int which = kInputSpare) noexcept { return slot (spares[which]); }
 
     uint64_t currentSerial() const noexcept { return nextSerial; }
+    int positionOfSerial (uint64_t serial) const noexcept; // -1 if not stored
 
     // Moves a spare into memory and returns the slot index it now occupies.
     // Requires !full().
@@ -110,7 +113,9 @@ public:
 
     // Audio thread. Takes over `old`'s traces (if keepTraces) and its spare
     // recordings by swapping buffers, so nothing is copied. If this store is
-    // smaller, clamped traces are kept first, then the newest. `old` is left
+    // smaller, clamped traces are kept first, then the newest. Traces already
+    // in this store (imported audio) count as the newest: they keep their
+    // place, follow old's traces in storage order and get fresh serials. `old` is left
     // holding the unused buffers and must outlive any playback that still
     // reads evicted traces.
     void adoptFrom (TraceStore& old, bool keepTraces) noexcept;

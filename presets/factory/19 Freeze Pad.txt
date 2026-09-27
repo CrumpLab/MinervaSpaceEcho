@@ -1,0 +1,7 @@
+# Spectral echo. Hold Spectral Freeze (or MIDI base note + 2) to sustain the
+# current echo as a drone.
+blend_domain = Spectral
+capacity = 100
+power = 3
+echo_level_db = -6
+spring_level_db = -18

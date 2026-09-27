@@ -1,6 +1,12 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include "ExamplePresets.h"
+#include <juce_audio_formats/juce_audio_formats.h>
+#include "FactoryPresets.h"
+#include "mse/Import.h"
+#include "mse/Preset.h"
+
 namespace {
 
 // Plugin state layout when memory is embedded (otherwise JUCE's plain XML
@@ -29,11 +35,13 @@ MinervaSpaceEchoProcessor::MinervaSpaceEchoProcessor()
     for (size_t i = 0; i < specs.size(); ++i)
         rawParams[i] = parameters.getRawParameterValue (specs[i].id);
 
-    startTimerHz (10);
+    engine.enableMemoryView();
+    startTimerHz (20);
 }
 
 MinervaSpaceEchoProcessor::~MinervaSpaceEchoProcessor()
 {
+    aliveFlag->store (false);
     stopTimer();
 }
 
@@ -156,6 +164,65 @@ void MinervaSpaceEchoProcessor::timerCallback()
     // memory the audio thread has let go of.
     applyMemoryConfig();
     engine.collectGarbage();
+
+    // A Mode Selector change from MIDI: make the parameter follow.
+    if (const int mode = pendingModeParam.exchange (-1); mode >= 0)
+        setParamValue (mse::kModeSelector, static_cast<float> (mode));
+}
+
+void MinervaSpaceEchoProcessor::setParamValue (int index, float realValue)
+{
+    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (
+            parameters.getParameter (mse::paramSpecs()[static_cast<size_t> (index)].id)))
+    {
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->convertTo0to1 (realValue));
+        param->endChangeGesture();
+    }
+}
+
+void MinervaSpaceEchoProcessor::handleMidi (const juce::MidiBuffer& midi, const mse::EngineParams& p) noexcept
+{
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        if (p.midiChannel > 0 && m.getChannel() != p.midiChannel)
+            continue;
+        if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            midiFreeze = midiSpectralFreeze = false;
+            continue;
+        }
+        const bool on = m.isNoteOn();
+        if (! on && ! m.isNoteOff())
+            continue;
+        const auto mapping = mse::midiMappingFor (m.getNoteNumber(), p.midiBaseNote);
+        if (on)
+        {
+            lastMidiNote.store (m.getNoteNumber(), std::memory_order_relaxed);
+            midiCount.fetch_add (1, std::memory_order_relaxed);
+        }
+        switch (mapping.action)
+        {
+            case mse::MidiAction::Freeze:         midiFreeze = on; break;
+            case mse::MidiAction::SpectralFreeze: midiSpectralFreeze = on; break;
+            case mse::MidiAction::None:           break;
+            case mse::MidiAction::ModeSelector:
+                if (on)
+                {
+                    modeOverride = mapping.value;
+                    modeOverrideSamples = 0;
+                    pendingModeParam.store (mapping.value);
+                }
+                break;
+            case mse::MidiAction::Capture:        if (on) engine.sendCommandFromAudioThread (mse::Command::Capture); break;
+            case mse::MidiAction::ClampLast:      if (on) engine.sendCommandFromAudioThread (mse::Command::ClampLast); break;
+            case mse::MidiAction::ClampAll:       if (on) engine.sendCommandFromAudioThread (mse::Command::ClampAll); break;
+            case mse::MidiAction::UnclampAll:     if (on) engine.sendCommandFromAudioThread (mse::Command::UnclampAll); break;
+            case mse::MidiAction::ClearUnclamped: if (on) engine.sendCommandFromAudioThread (mse::Command::ClearUnclamped); break;
+            case mse::MidiAction::ClearAll:       if (on) engine.sendCommandFromAudioThread (mse::Command::ClearAll); break;
+        }
+    }
 }
 
 void MinervaSpaceEchoProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -205,7 +272,7 @@ mse::HostClock MinervaSpaceEchoProcessor::readHostClock()
     return clock;
 }
 
-void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -217,7 +284,23 @@ void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     // the transport stopped (plan §6).
     fallbackPpq = clock.ppqPosition + buffer.getNumSamples() / getSampleRate() * clock.bpm / 60.0;
 
-    engine.setParams (readParams());
+    auto params = readParams();
+    if (params.midiControl)
+        handleMidi (midi, params);
+    else
+        midiFreeze = midiSpectralFreeze = false;
+    params.freeze = params.freeze || midiFreeze;
+    params.spectralFreeze = params.spectralFreeze || midiSpectralFreeze;
+    if (modeOverride >= 0)
+    {
+        // Until the parameter has caught up (or half a second has passed).
+        modeOverrideSamples += buffer.getNumSamples();
+        if (static_cast<int> (params.modeSelector) == modeOverride || modeOverrideSamples > getSampleRate() * 0.5)
+            modeOverride = -1;
+        else
+            params.modeSelector = static_cast<mse::ModeSelector> (modeOverride);
+    }
+    engine.setParams (params);
     auto main = getBusBuffer (buffer, false, 0);
     const float* const* sidechain = nullptr;
     int sidechainChannels = 0;
@@ -318,6 +401,205 @@ void MinervaSpaceEchoProcessor::setStateInformation (const void* data, int sizeI
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+}
+
+// ---- importing audio ------------------------------------------------------------
+
+bool MinervaSpaceEchoProcessor::isImportableFile (const juce::String& path)
+{
+    return juce::File (path).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;m4a;caf");
+}
+
+bool MinervaSpaceEchoProcessor::getLockImports() const
+{
+    return static_cast<bool> (parameters.state.getProperty ("lockImports", false));
+}
+
+void MinervaSpaceEchoProcessor::setLockImports (bool lock)
+{
+    parameters.state.setProperty ("lockImports", lock, nullptr);
+}
+
+mse::MemorySnapshot MinervaSpaceEchoProcessor::decodeForImport (const juce::StringArray& paths, const mse::ImportSettings& settings,
+                                                                double targetRate, juce::StringArray& problems, int& files)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    mse::MemorySnapshot all;
+    all.sampleRate = targetRate;
+    files = 0;
+    const double maxSeconds = settings.traceSeconds * settings.maxTraces + 1.0;
+    for (const auto& path : paths)
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (path)));
+        if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+        {
+            problems.add (juce::File (path).getFileName());
+            continue;
+        }
+        const auto length = static_cast<int> (std::min<juce::int64> (reader->lengthInSamples,
+                                                                    static_cast<juce::int64> (maxSeconds * reader->sampleRate)));
+        const int channels = std::clamp (static_cast<int> (reader->numChannels), 1, 2);
+        juce::AudioBuffer<float> buffer (channels, length);
+        reader->read (&buffer, 0, length, 0, true, channels > 1);
+        std::vector<std::vector<float>> audio (static_cast<size_t> (channels));
+        for (int c = 0; c < channels; ++c)
+            audio[static_cast<size_t> (c)].assign (buffer.getReadPointer (c), buffer.getReadPointer (c) + length);
+        auto s = settings;
+        s.maxTraces = settings.maxTraces - static_cast<int> (all.traces.size());
+        if (s.maxTraces <= 0)
+            break;
+        auto snap = mse::tracesFromAudio (audio, reader->sampleRate, targetRate, s);
+        for (auto& t : snap.traces)
+            all.traces.push_back (std::move (t));
+        ++files;
+    }
+    for (size_t i = 0; i < all.traces.size(); ++i)
+        all.traces[i].serial = i + 1;
+    return all;
+}
+
+void MinervaSpaceEchoProcessor::importAudioFiles (const juce::StringArray& paths, std::function<void (juce::String)> done)
+{
+    const auto p = readParams();
+    mse::ImportSettings settings;
+    settings.traceSeconds = engine.getStats().traceSeconds;
+    if (settings.traceSeconds <= 0.0)
+        settings.traceSeconds = p.syncMode == mse::SyncMode::Tempo
+                                    ? mse::divisionQuarters (p.traceDivision, 4, 4) * 60.0 / std::max (20.0, uiClock.bpm.load())
+                                    : p.traceMs * 0.001;
+    settings.features = { p.featureMode, p.ternaryThreshold };
+    settings.clamp = getLockImports();
+    settings.maxTraces = p.capacity;
+    const double targetRate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
+    auto alive = aliveFlag;
+
+    juce::Thread::launch ([this, alive, paths, settings, targetRate, done = std::move (done)] {
+        juce::StringArray problems;
+        int files = 0;
+        auto all = decodeForImport (paths, settings, targetRate, problems, files);
+        juce::MessageManager::callAsync ([this, alive, all = std::move (all), problems, files, settings, done] {
+            if (! alive->load())
+                return;
+            engine.importTraces (all);
+            juce::String msg = "Added " + juce::String (static_cast<int> (all.traces.size())) + " traces ("
+                               + juce::String (settings.traceSeconds, 2) + " s each) from " + juce::String (files)
+                               + (files == 1 ? " file" : " files") + (settings.clamp ? ", clamped" : "");
+            if (! problems.isEmpty())
+                msg << ". Could not read: " << problems.joinIntoString (", ");
+            done (msg);
+        });
+    });
+}
+
+// ---- presets ----------------------------------------------------------------------
+
+juce::File MinervaSpaceEchoProcessor::userPresetFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+        .getChildFile ("MINERVA Space Echo")
+        .getChildFile ("Presets");
+}
+
+namespace {
+
+void addBuiltIn (juce::Array<MinervaSpaceEchoProcessor::Preset>& out, const juce::String& category, int count,
+                 const char* const* names, const char* (*original) (const char*),
+                 const char* (*get) (const char*, int&))
+{
+    juce::Array<MinervaSpaceEchoProcessor::Preset> found;
+    for (int i = 0; i < count; ++i)
+    {
+        int size = 0;
+        const char* data = get (names[i], size);
+        const juce::String file = original (names[i]);
+        if (data == nullptr || ! file.endsWithIgnoreCase (".txt"))
+            continue;
+        MinervaSpaceEchoProcessor::Preset p;
+        p.name = file.dropLastCharacters (4).replaceCharacter ('_', ' ');
+        p.category = category;
+        p.text = juce::String::fromUTF8 (data, size);
+        found.add (p);
+    }
+    std::sort (found.begin(), found.end(), [] (const auto& a, const auto& b) { return a.name < b.name; });
+    out.addArray (found);
+}
+
+} // namespace
+
+const juce::Array<MinervaSpaceEchoProcessor::Preset>& MinervaSpaceEchoProcessor::getPresets()
+{
+    if (! presetsScanned)
+        rescanUserPresets();
+    return presets;
+}
+
+void MinervaSpaceEchoProcessor::rescanUserPresets()
+{
+    presets.clear();
+    addBuiltIn (presets, "Factory", FactoryPresets::namedResourceListSize, FactoryPresets::namedResourceList,
+                            FactoryPresets::getNamedResourceOriginalFilename, FactoryPresets::getNamedResource);
+    addBuiltIn (presets, "Examples", ExamplePresets::namedResourceListSize, ExamplePresets::namedResourceList,
+                            ExamplePresets::getNamedResourceOriginalFilename, ExamplePresets::getNamedResource);
+    auto files = userPresetFolder().findChildFiles (juce::File::findFiles, false, "*.txt");
+    files.sort();
+    for (const auto& f : files)
+    {
+        Preset p;
+        p.name = f.getFileNameWithoutExtension();
+        p.category = "User";
+        p.file = f;
+        presets.add (p);
+    }
+    presetsScanned = true;
+}
+
+juce::String MinervaSpaceEchoProcessor::applyPreset (const Preset& preset)
+{
+    const auto text = preset.file != juce::File() ? preset.file.loadFileAsString() : preset.text;
+    // Everything a preset doesn't mention returns to its default; session
+    // settings (memory budget, embedding, MIDI) are left alone.
+    auto values = mse::defaultParamValues();
+    for (int i = 0; i < mse::kNumParams; ++i)
+        if (mse::isSessionParam (i))
+            values[static_cast<size_t> (i)] = rawParams[static_cast<size_t> (i)]->load();
+    try
+    {
+        std::vector<mse::TimedAssignment> timed; // render-only changes over time: ignored here
+        mse::applyPresetText (values, text.toStdString(), &timed, preset.name.toStdString());
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+    for (int i = 0; i < mse::kNumParams; ++i)
+        if (! mse::isSessionParam (i) && ! juce::exactlyEqual (values[static_cast<size_t> (i)], rawParams[static_cast<size_t> (i)]->load()))
+            setParamValue (i, values[static_cast<size_t> (i)]);
+    parameters.state.setProperty ("presetName", preset.name, nullptr);
+    return {};
+}
+
+juce::String MinervaSpaceEchoProcessor::saveUserPreset (const juce::String& name, const juce::String& description)
+{
+    const auto clean = juce::File::createLegalFileName (name.trim());
+    if (clean.isEmpty())
+        return "Please give the preset a name.";
+    mse::ParamValues values {};
+    for (size_t i = 0; i < values.size(); ++i)
+        values[i] = rawParams[i]->load();
+    const auto dir = userPresetFolder();
+    dir.createDirectory();
+    const auto file = dir.getChildFile (clean + ".txt");
+    if (! file.replaceWithText (mse::writePreset (values, description.trim().toStdString())))
+        return "Could not write " + file.getFullPathName();
+    parameters.state.setProperty ("presetName", clean, nullptr);
+    rescanUserPresets();
+    return {};
+}
+
+juce::String MinervaSpaceEchoProcessor::getCurrentPresetName() const
+{
+    return parameters.state.getProperty ("presetName", "").toString();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

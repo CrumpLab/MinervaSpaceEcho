@@ -1,12 +1,15 @@
-#include "Preset.h"
+#include "mse/Preset.h"
+
+#include <sstream>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <stdexcept>
 
-namespace mse::tools {
+namespace mse {
 
 namespace {
 
@@ -96,12 +99,10 @@ Command parseCommand (const std::string& raw)
     throw std::runtime_error ("unknown command: " + raw);
 }
 
-void applyPresetFile (ParamValues& values, const std::string& path, std::vector<TimedAssignment>* timed)
+void applyPresetText (ParamValues& values, const std::string& text, std::vector<TimedAssignment>* timed,
+                      const std::string& source)
 {
-    std::ifstream in (path);
-    if (! in)
-        throw std::runtime_error ("cannot open preset " + path);
-
+    std::istringstream in (text);
     std::string line;
     int lineNo = 0;
     while (std::getline (in, line))
@@ -142,9 +143,81 @@ void applyPresetFile (ParamValues& values, const std::string& path, std::vector<
         }
         catch (const std::exception& e)
         {
-            throw std::runtime_error (path + ":" + std::to_string (lineNo) + ": " + e.what());
+            throw std::runtime_error (source + ":" + std::to_string (lineNo) + ": " + e.what());
         }
     }
+}
+
+void applyPresetFile (ParamValues& values, const std::string& path, std::vector<TimedAssignment>* timed)
+{
+    std::ifstream in (path);
+    if (! in)
+        throw std::runtime_error ("cannot open preset " + path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    applyPresetText (values, buffer.str(), timed, path);
+}
+
+std::string presetDescription (const std::string& text)
+{
+    std::istringstream in (text);
+    std::string line, out;
+    while (std::getline (in, line))
+    {
+        const auto t = trim (line);
+        if (t.empty() || t[0] != '#')
+            break;
+        const auto body = trim (t.substr (1));
+        out += (out.empty() ? "" : " ") + body;
+    }
+    return out;
+}
+
+bool isSessionParam (int index)
+{
+    switch (index)
+    {
+        case kCapture:
+        case kTriggerClampLast: case kTriggerClampAll: case kTriggerUnclampAll:
+        case kTriggerClearUnclamped: case kTriggerClearAll:
+        case kMemoryBudget: case kEmbedMemory: case kMidiControl: case kMidiChannel: case kMidiBaseNote:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::string writePreset (const ParamValues& values, const std::string& description)
+{
+    std::string out;
+    std::istringstream desc (description);
+    std::string line;
+    while (std::getline (desc, line))
+        out += "# " + line + "\n";
+
+    const auto defaults = defaultParamValues();
+    const auto& specs = paramSpecs();
+    char buf[64];
+    for (size_t i = 0; i < specs.size(); ++i)
+    {
+        if (isSessionParam (static_cast<int> (i)) || values[i] == defaults[i])
+            continue;
+        const auto& s = specs[i];
+        std::string value;
+        if (s.type == ParamType::Choice || s.type == ParamType::Bool)
+            value = s.choices[std::clamp (static_cast<int> (std::lround (values[i])), 0, s.numChoices - 1)];
+        else if (s.type == ParamType::Int)
+            value = std::to_string (static_cast<int> (std::lround (values[i])));
+        else
+        {
+            std::snprintf (buf, sizeof (buf), "%.6g", static_cast<double> (values[i]));
+            value = buf;
+        }
+        if (s.type == ParamType::Bool)
+            value = values[i] > 0.5f ? "on" : "off";
+        out += std::string (s.id) + " = " + value + "\n";
+    }
+    return out;
 }
 
 std::string describeParams()
@@ -171,4 +244,4 @@ std::string describeParams()
     return out;
 }
 
-} // namespace mse::tools
+} // namespace mse

@@ -1,0 +1,4 @@
+# A 1-trace memory is a plain 1-bar tape delay. Feedback repeats it.
+capacity = 1
+feedback = 0.45
+echo_level_db = -6

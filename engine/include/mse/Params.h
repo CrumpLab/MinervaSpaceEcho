@@ -63,6 +63,11 @@ struct EngineParams
     float clampBudget = 0.5f;                          // max fraction of capacity that may be clamped
     bool clampProtects = true;                         // clamped traces don't decay
 
+    // memory actions as parameters: a rising edge fires ClampLast, ClampAll,
+    // UnclampAll, ClearUnclamped, ClearAll (for host MIDI mapping / automation)
+    static constexpr int kNumTriggers = 5;
+    bool trigger[kNumTriggers] = {};
+
     // forgetting
     float encodingFailure = 0.0f;                      // Lf: probability each stored feature is lost
     float contentDropout = 0.0f;                       // probability each 1/32 of a stored trace drops out
@@ -137,6 +142,9 @@ struct EngineParams
 
     // plugin only
     bool embedMemory = false;
+    bool midiControl = true;                           // MIDI notes trigger actions (see MidiMap.h)
+    int midiChannel = 0;                               // 0 = any
+    int midiBaseNote = 36;                             // C1 in Live
 
     bool operator== (const EngineParams&) const = default;
 };
@@ -156,6 +164,7 @@ enum ParamIndex
     kCapacity, kMemoryBudget, kFullPolicy, kMergeThreshold, kFreeze,
     kWriteMode, kCapture, kWriteGateDb, kNoveltyMode, kNoveltyThreshold, kWriteProbability, kRecordSource,
     kClampIncoming, kClampBudget, kClampProtects,
+    kTriggerClampLast, kTriggerClampAll, kTriggerUnclampAll, kTriggerClearUnclamped, kTriggerClearAll,
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
     kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
     kCueSource, kFeatureFocus, kRecency,
@@ -168,7 +177,7 @@ enum ParamIndex
     kSpringLevelDb, kSpringDecay, kSpringOnDry,
     kBlendDomain, kSpectralVoices, kSpectralFreeze, kMaxActive,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,
-    kEmbedMemory,
+    kEmbedMemory, kMidiControl, kMidiChannel, kMidiBaseNote,
     kNumParams
 };
 

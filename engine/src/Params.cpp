@@ -59,6 +59,12 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "clamp_incoming",     "Clamp Incoming",        ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
     { "clamp_budget",       "Clamp Budget",          ParamType::Float,  0,    1,      0.5f,  0,    "",       NOCHOICE,                      true },
     { "clamp_protects",     "Clamped Don't Decay",   ParamType::Bool,   0,    1,      1,     0,    "",       CHOICE (kBoolChoices),         true },
+    // memory actions as parameters (rising edge fires; for host MIDI mapping and automation)
+    { "trigger_clamp_last",      "Clamp Last (Trigger)",      ParamType::Bool, 0, 1, 0, 0, "", CHOICE (kBoolChoices), true },
+    { "trigger_clamp_all",       "Clamp All (Trigger)",       ParamType::Bool, 0, 1, 0, 0, "", CHOICE (kBoolChoices), true },
+    { "trigger_unclamp_all",     "Unclamp All (Trigger)",     ParamType::Bool, 0, 1, 0, 0, "", CHOICE (kBoolChoices), true },
+    { "trigger_clear_unclamped", "Clear Unclamped (Trigger)", ParamType::Bool, 0, 1, 0, 0, "", CHOICE (kBoolChoices), true },
+    { "trigger_clear_all",       "Clear All (Trigger)",       ParamType::Bool, 0, 1, 0, 0, "", CHOICE (kBoolChoices), true },
     // forgetting
     { "encoding_failure",   "Encoding Failure (Lf)", ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     { "content_dropout",    "Tape Dropouts",         ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
@@ -129,6 +135,9 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "output_gain_db",     "Output Gain",           ParamType::Float,  -60,  12,     0,     0,    "dB",     NOCHOICE,                      true },
     // plugin
     { "embed_memory",       "Save Memory With Set",  ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         false },
+    { "midi_control",       "MIDI Note Control",     ParamType::Bool,   0,    1,      1,     0,    "",       CHOICE (kBoolChoices),         false },
+    { "midi_channel",       "MIDI Channel",          ParamType::Int,    0,    16,     0,     0,    "",       NOCHOICE,                      false },
+    { "midi_base_note",     "MIDI Base Note",        ParamType::Int,    0,    100,    36,    0,    "",       NOCHOICE,                      false },
 } };
 // clang-format on
 
@@ -197,6 +206,11 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.clampIncoming = on (kClampIncoming);
     p.clampBudget = v (kClampBudget);
     p.clampProtects = on (kClampProtects);
+    p.trigger[0] = on (kTriggerClampLast);
+    p.trigger[1] = on (kTriggerClampAll);
+    p.trigger[2] = on (kTriggerUnclampAll);
+    p.trigger[3] = on (kTriggerClearUnclamped);
+    p.trigger[4] = on (kTriggerClearAll);
 
     p.encodingFailure = v (kEncodingFailure);
     p.contentDropout = v (kContentDropout);
@@ -268,6 +282,9 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.outputGainDb = v (kOutputGainDb);
 
     p.embedMemory = on (kEmbedMemory);
+    p.midiControl = on (kMidiControl);
+    p.midiChannel = idx (kMidiChannel);
+    p.midiBaseNote = idx (kMidiBaseNote);
     return p;
 }
 

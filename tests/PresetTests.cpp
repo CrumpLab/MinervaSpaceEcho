@@ -1,4 +1,4 @@
-#include "Preset.h"
+#include "mse/Preset.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,14 +10,14 @@ using namespace mse;
 TEST_CASE ("Assignments set known parameters")
 {
     auto v = defaultParamValues();
-    tools::applyAssignment (v, " output_gain_db = -3.5 ");
+    applyAssignment (v, " output_gain_db = -3.5 ");
     REQUIRE (v[kOutputGainDb] == -3.5f);
 
-    tools::applyAssignment (v, "sync_mode = Free");
-    tools::applyAssignment (v, "trace_division=2 bars");
-    tools::applyAssignment (v, "self_match=off");
-    tools::applyAssignment (v, "normalization=2");
-    tools::applyAssignment (v, "capacity=8");
+    applyAssignment (v, "sync_mode = Free");
+    applyAssignment (v, "trace_division=2 bars");
+    applyAssignment (v, "self_match=off");
+    applyAssignment (v, "normalization=2");
+    applyAssignment (v, "capacity=8");
     const auto p = paramsFromValues (v);
     REQUIRE (p.syncMode == SyncMode::Free);
     REQUIRE (p.traceDivision == TraceDivision::Bar2);
@@ -29,12 +29,12 @@ TEST_CASE ("Assignments set known parameters")
 TEST_CASE ("Unknown keys and bad values are rejected")
 {
     auto v = defaultParamValues();
-    REQUIRE_THROWS (tools::applyAssignment (v, "nope=1"));
-    REQUIRE_THROWS (tools::applyAssignment (v, "output_gain_db=loud"));
-    REQUIRE_THROWS (tools::applyAssignment (v, "output_gain_db"));
-    REQUIRE_THROWS (tools::applyAssignment (v, "output_gain_db=100"));   // out of range
-    REQUIRE_THROWS (tools::applyAssignment (v, "capacity=2.5"));         // not an integer
-    REQUIRE_THROWS (tools::applyAssignment (v, "sync_mode=Sometimes"));
+    REQUIRE_THROWS (applyAssignment (v, "nope=1"));
+    REQUIRE_THROWS (applyAssignment (v, "output_gain_db=loud"));
+    REQUIRE_THROWS (applyAssignment (v, "output_gain_db"));
+    REQUIRE_THROWS (applyAssignment (v, "output_gain_db=100"));   // out of range
+    REQUIRE_THROWS (applyAssignment (v, "capacity=2.5"));         // not an integer
+    REQUIRE_THROWS (applyAssignment (v, "sync_mode=Sometimes"));
 }
 
 TEST_CASE ("Preset files support comments and blank lines")
@@ -45,7 +45,7 @@ TEST_CASE ("Preset files support comments and blank lines")
         f << "# a comment\n\noutput_gain_db = -12   # trailing comment\npower = 9\n";
     }
     auto v = defaultParamValues();
-    tools::applyPresetFile (v, path);
+    applyPresetFile (v, path);
     REQUIRE (v[kOutputGainDb] == -12.0f);
     REQUIRE (v[kPower] == 9.0f);
     std::filesystem::remove (path);
@@ -78,20 +78,20 @@ TEST_CASE ("Preset files can schedule parameter changes and commands at bars")
         f << "power = 5\n@8 freeze = on\n@2.5 command = clamp_all\n";
     }
     auto v = defaultParamValues();
-    std::vector<tools::TimedAssignment> timed;
-    tools::applyPresetFile (v, path, &timed);
+    std::vector<TimedAssignment> timed;
+    applyPresetFile (v, path, &timed);
     REQUIRE (v[kPower] == 5.0f);
     REQUIRE (v[kFreeze] == 0.0f); // timed lines don't apply immediately
     REQUIRE (timed.size() == 2);
     REQUIRE (timed[0].bar == 8.0);
     REQUIRE (timed[1].bar == 2.5);
-    REQUIRE (tools::parseCommand (timed[1].value) == Command::ClampAll);
+    REQUIRE (parseCommand (timed[1].value) == Command::ClampAll);
 
-    REQUIRE_THROWS (tools::applyPresetFile (v, path)); // timed lines need a receiver
+    REQUIRE_THROWS (applyPresetFile (v, path)); // timed lines need a receiver
     {
         std::ofstream f (path);
         f << "@4 command = dance\n";
     }
-    REQUIRE_THROWS (tools::applyPresetFile (v, path, &timed));
+    REQUIRE_THROWS (applyPresetFile (v, path, &timed));
     std::filesystem::remove (path);
 }

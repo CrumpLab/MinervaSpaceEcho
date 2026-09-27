@@ -1,0 +1,10 @@
+# The five closest memories play as separate chorus voices, spread across
+# the stereo field, detuned and slightly delayed.
+playback = Voices
+voices = 5
+voice_spread = 0.9
+voice_detune = 12
+voice_delay_ms = 15
+capacity = 100
+power = 2
+echo_level_db = -6

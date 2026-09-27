@@ -16,7 +16,9 @@ add_executable(mse_tests
     HeadsTests.cpp
     TapeTests.cpp
     SpectralTests.cpp
+    ControlTests.cpp
 )
+target_compile_definitions(mse_tests PRIVATE MSE_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
 target_link_libraries(mse_tests PRIVATE mse_tools_common Catch2::Catch2WithMain)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

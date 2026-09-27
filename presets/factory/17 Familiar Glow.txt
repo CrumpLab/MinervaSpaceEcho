@@ -1,0 +1,10 @@
+# Familiar material echoes bright and loud; the unfamiliar returns muffled
+# and feeds back less.
+echo_tone_hz = 5000
+intensity_to_tone = 1
+intensity_to_feedback = 0.5
+feedback = 0.3
+capacity = 100
+power = 3
+self_match = off
+echo_level_db = -6

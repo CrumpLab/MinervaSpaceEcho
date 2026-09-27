@@ -1,0 +1,6 @@
+# Eight traces that consolidate instead of forgetting: each new bar is
+# averaged into the most similar one, so prototypes form.
+capacity = 8
+full_policy = Merge Similar
+power = 3
+echo_level_db = -6

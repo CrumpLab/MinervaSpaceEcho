@@ -10,6 +10,9 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_library(mse_engine STATIC
     src/EchoEngine.cpp
     src/Features.cpp
+    src/Import.cpp
+    src/MidiMap.cpp
+    src/Preset.cpp
     src/MemorySnapshot.cpp
     src/Params.cpp
     src/Retrieval.cpp

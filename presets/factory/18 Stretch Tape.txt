@@ -1,0 +1,6 @@
+# Change the trace length and old bars are time-stretched to fit, keeping
+# their pitch. Try switching Trace Length while memory is frozen.
+length_mismatch = Stretch
+capacity = 100
+power = 9
+echo_level_db = -6

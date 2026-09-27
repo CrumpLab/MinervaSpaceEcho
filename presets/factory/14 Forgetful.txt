@@ -1,0 +1,10 @@
+# Memory that ages: traces fade, lose features and dull over time, with tape
+# dropouts when they are recorded.
+capacity = 100
+power = 3
+self_match = off
+decay_fade_db = 1.5
+decay_forget = 0.05
+wear_tone = 0.8
+content_dropout = 0.15
+echo_level_db = -4

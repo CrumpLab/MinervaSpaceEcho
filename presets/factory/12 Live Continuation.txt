@@ -1,0 +1,8 @@
+# No bar grid: every 100 ms the last 250 ms you played is searched for in
+# every stored bar, and memory carries on from the best matches.
+cue_mode = Rolling
+rolling_window_ms = 250
+rolling_interval_ms = 100
+capacity = 100
+power = 9
+echo_level_db = -6

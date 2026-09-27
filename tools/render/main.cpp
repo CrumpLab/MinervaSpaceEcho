@@ -1,6 +1,6 @@
 // mse-render: runs a WAV file through the engine offline, block by block,
 // exactly as a host would, with a synthesised host clock.
-#include "Preset.h"
+#include "mse/Preset.h"
 #include "mse/Wav.h"
 
 #include "mse/EchoEngine.h"
@@ -29,7 +29,7 @@ void usage()
         "  --load-memory <dir>  start with a saved memory (Save Memory folder)\n"
         "  --save-memory <dir>  save the memory at the end of the render\n"
         "  --pcm24           write 24-bit PCM instead of 32-bit float\n"
-        "parameters (--set id=value):\n%s", mse::tools::describeParams().c_str());
+        "parameters (--set id=value):\n%s", mse::describeParams().c_str());
 }
 
 } // namespace
@@ -37,7 +37,7 @@ void usage()
 int main (int argc, char** argv)
 {
     std::vector<std::string> positional, assignments;
-    std::vector<mse::tools::TimedAssignment> timed;
+    std::vector<mse::TimedAssignment> timed;
     std::string presetPath;
     double bpm = 120.0, tailSeconds = 0.0;
     bool freeRunning = false;
@@ -82,9 +82,9 @@ int main (int argc, char** argv)
     {
         auto values = mse::defaultParamValues();
         if (! presetPath.empty())
-            mse::tools::applyPresetFile (values, presetPath, &timed);
+            mse::applyPresetFile (values, presetPath, &timed);
         for (const auto& s : assignments)
-            mse::tools::applyAssignment (values, s);
+            mse::applyAssignment (values, s);
         const auto params = mse::paramsFromValues (values);
 
         auto audio = mse::readWav (positional[0]);
@@ -125,10 +125,10 @@ int main (int argc, char** argv)
             {
                 const auto& t = timed[nextTimed++];
                 if (t.key == "command")
-                    engine.sendCommand (mse::tools::parseCommand (t.value));
+                    engine.sendCommand (mse::parseCommand (t.value));
                 else
                 {
-                    mse::tools::applyParam (values, t.key, t.value);
+                    mse::applyParam (values, t.key, t.value);
                     changed = true;
                 }
             }

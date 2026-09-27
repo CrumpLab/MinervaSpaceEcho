@@ -1,0 +1,6 @@
+# Progressive cue: memory is re-cued as each bar unfolds, so earlier bars
+# that began the same way play along in step with you.
+cue_mode = Progressive
+capacity = 100
+power = 9
+echo_level_db = -6

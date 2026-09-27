@@ -1,0 +1,9 @@
+# 40 ms traces, up to 2000 of them: each grain is answered by the 24 most
+# similar earlier grains, a granular cloud that follows your playing.
+sync_mode = Free
+trace_ms = 40
+capacity = 2000
+max_active = 24
+power = 6
+self_match = off
+echo_level_db = -6

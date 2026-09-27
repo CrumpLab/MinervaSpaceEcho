@@ -8,7 +8,7 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 6 (spectral engine).** The plugin cuts the input into traces
+**Status: Stage 7 (custom UI and control).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
@@ -23,6 +23,10 @@ wow and flutter, tape drive, hiss, bass/treble in the feedback path, and a
 spring reverb. Stage 6 can blend memories as spectra instead of waveforms,
 time-stretch old traces to a new repeat rate without changing pitch, freeze
 the echo's spectrum into a drone, and hold thousands of tiny "grain" traces.
+Stage 7 gives it its own window, built around a live view of the memory
+matrix, plus presets, drag-and-drop audio import and MIDI control.
+
+![The plugin window](docs/screenshot.png)
 
 ## How it behaves
 
@@ -102,11 +106,78 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Echo Level** / **Dry Level** / **Output Gain** | Mix. −60 dB = off. |
 | **Edge Fade** | Fade length at trace edges and when the echo changes (declicking). |
 
-The bottom of the plugin window shows memory fill and clamping, what happened
-to the last bar (stored / merged / gated / rejected / frozen), how many traces
-the current echo uses, its intensity (MINERVA's familiarity signal) and the
-host clock. Buttons: **Capture**, **Clamp Last**, **Clamp All**, **Unclamp
-All**, **Clear Unclamped**, **Clear All**, **Save Memory…**, **Load Memory…**.
+| **MIDI Note Control** / **MIDI Channel** / **MIDI Base Note** | Whether MIDI notes trigger actions, on which channel (Any = all), and the first note of the map (see *MIDI control*). |
+| **Clamp Last / Clamp All / Unclamp All / Clear Unclamped / Clear All (Trigger)** | The memory buttons as parameters: each fires when switched on. Map them to pads with Live's MIDI Map mode, or automate them. |
+
+## The plugin window
+
+- **Memory matrix** (top left). One row per stored trace, oldest at the top.
+  The coloured strip is the trace's *address*, exactly as MINERVA stores it:
+  16 time slots, each a 24-band spectrum (amber above the trace's average
+  level, blue below). Left of it: a **lock** column (click to clamp or
+  unclamp a trace), the trace's **activation** in the last retrieval (amber
+  positive, blue negative), and which **heads** are playing it right now
+  (1 amber, 2 teal, 3 violet). Rows grow tall while memory is nearly empty
+  and shrink as it fills; with thousands of traces each pixel row shows the
+  strongest of its traces. Hover a row for its details; click it to inspect.
+- **Heard / Echo** (top right). The address of the last segment you played
+  (the cue) and the echo's content (the activation-weighted blend of the
+  answering traces' addresses, MINERVA's echo). Time runs left to right, low
+  bands at the bottom.
+- **Familiarity**. The strongest activation (how well memory recognised the
+  cue) and MINERVA's intensity (the sum of activations).
+- **Selected trace**. Its address, age, length, level, strength, generation
+  (heard or echo) and merges, with **Clamp** and **Delete** buttons.
+- **Buttons**: **Capture**, **Clamp Last**, **Clamp All**, **Unclamp All**,
+  **Clear Unclamped**, **Clear All**, **Import Audio…**, **Save Memory…**,
+  **Load Memory…**, and **Clamp imports**.
+- **Parameter pages**: Main (the essentials), Memory, Forgetting, Retrieval,
+  Cueing, Heads, Tape, Spectral, Mix and Control. Settings that have no effect
+  with the current choices (say, Trace Length (Free) while synced to tempo) are
+  dimmed. Double-click a knob to reset it.
+- **Status bar**: progress through the current trace, trace length, host
+  tempo and bar, the longest trace a memory slot can hold, and evictions and
+  merges. Messages (imports, saves, presets) appear here too.
+
+**Presets.** The menu at the top holds three sets: *Factory* (21 presets
+meant for playing, with the dry signal on), *Examples* (the listening
+examples, mostly echo only) and *User*. **Save…** writes the current
+settings to `~/Music/MINERVA Space Echo/Presets/<name>.txt`. Presets use the
+same `key = value` text format as `mse-render`, and list only settings that
+differ from the defaults. Loading a preset resets everything else to its
+default, except session settings (memory budget, Save Memory With Set, MIDI).
+Timed lines (`@8 freeze = on`) only apply in offline renders. Live's own
+device presets (.adv) also work as usual.
+
+**Importing audio.** Drop audio files (WAV, AIFF, FLAC, Ogg, MP3, M4A, CAF) on
+the plugin, or use **Import Audio…**. Each file is cut into traces of the
+current trace length, and every trace gets its address exactly as if it had
+been played in. Imports join memory as the newest traces. If memory is full,
+clamped traces are kept first, then the newest (so imports win over older
+unclamped traces). Turn on **Clamp imports** to protect them from being
+replaced (within the clamp budget). Silent stretches are skipped, and a last
+piece shorter than a quarter of a trace is dropped. You can seed the memory
+with a drum break or a phrase and let your playing recall pieces of it.
+
+**MIDI control.** With the VST3 (and the standalone app), MIDI notes trigger
+actions, counted from **MIDI Base Note** (default 36, C1 in Live):
+
+| Note | Action | Note | Action |
+|---|---|---|---|
+| C1 | Capture | G1 | Clear All |
+| C#1 | Freeze Memory, while held | C2 | Mode Selector: Custom |
+| D1 | Spectral Freeze, while held | C#2 … G#2 | Mode Selector: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative |
+| D#1 | Clamp Last | | |
+| E1 | Clamp All | | |
+| F1 | Unclamp All | | |
+| F#1 | Clear Unclamped | | |
+
+In Live, put the plugin on an audio track, then on a MIDI track set *MIDI To*
+to that track and choose the plugin. Clips can then freeze, clear, capture
+and switch heads in time with the music. The AU is built as a plain audio
+effect, which hosts don't send notes to. With the AU, map the *Trigger*
+parameters, Freeze Memory, Spectral Freeze and Mode Selector with Live's
+MIDI Map mode (⌘M) instead. That works with both formats.
 
 **Saving memory.** *Save Memory…* writes a folder containing one WAV per trace
 plus `manifest.json` (addresses, clamp state, ages, strengths, and the
@@ -129,7 +200,8 @@ Presets can change settings partway through a render with timed lines such as
 | `plugin/` | JUCE wrapper (AU, VST3, Standalone) |
 | `tools/` | `mse-testgen` (synthetic test audio) and `mse-render` (offline WAV processing) |
 | `tests/` | Catch2 unit tests |
-| `presets/` | Parameter presets for `mse-render` (`key = value` lines) |
+| `presets/` | Presets (`key = value` lines): `factory/` (built into the plugin), `examples/` (listening examples, also built in) |
+| `docs/` | Screenshot (rendered headless by `mse-ui-snapshot`) |
 
 ## Getting a build on your Mac
 

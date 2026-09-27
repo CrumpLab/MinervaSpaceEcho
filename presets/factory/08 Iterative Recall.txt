@@ -1,0 +1,9 @@
+# Head 2 is cued by head 1's echo and head 3 by head 2's: each generation
+# drifts toward what memory holds in general.
+mode_selector = Iterative 1+2+3
+head2_level_db = -3
+head3_level_db = -6
+capacity = 100
+power = 3
+self_match = off
+echo_level_db = -6

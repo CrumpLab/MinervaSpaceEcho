@@ -1,0 +1,8 @@
+# A bar is stored only when memory has nothing much like it, so memory
+# becomes a catalogue of distinct ideas.
+capacity = 100
+power = 5
+novelty_mode = Store Novel
+novelty_threshold = 0.7
+self_match = off
+echo_level_db = -6

@@ -49,6 +49,14 @@ int TraceStore::positionOf (int slotIndex) const noexcept
     return -1;
 }
 
+int TraceStore::positionOfSerial (uint64_t serial) const noexcept
+{
+    for (size_t i = 0; i < order.size(); ++i)
+        if (slots[static_cast<size_t> (order[i])].serial == serial)
+            return static_cast<int> (i);
+    return -1;
+}
+
 int TraceStore::clampedCount() const noexcept
 {
     int n = 0;
@@ -144,6 +152,7 @@ void TraceStore::adoptFrom (TraceStore& old, bool keepTraces) noexcept
     nextSerial = std::max (nextSerial, old.nextSerial);
     if (! keepTraces || channels != old.channels)
         return;
+    const int mine = size(); // imported traces already here
 
     // Choose what survives: clamped first (newest first), then unclamped newest.
     // `mergeCount` < 0 is used as a temporary "keep" mark on old slots.
@@ -173,6 +182,14 @@ void TraceStore::adoptFrom (TraceStore& old, bool keepTraces) noexcept
         swapBuffers (to, old, from); // the trace's buffers move here
         copyMeta (to, src);          // metadata + features
         order.push_back (to);
+    }
+
+    if (mine > 0)
+    {
+        // Imported traces are the newest: after old's, with serials after them.
+        std::rotate (order.begin(), order.begin() + mine, order.end());
+        for (int i = size() - mine; i < size(); ++i)
+            slots[static_cast<size_t> (order[static_cast<size_t> (i)])].serial = nextSerial++;
     }
 }
 

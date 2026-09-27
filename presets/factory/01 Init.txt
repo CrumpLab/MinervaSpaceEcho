@@ -1,0 +1,2 @@
+# Every setting at its default: a 100-bar memory that answers each bar with
+# a blend of the bars most like it, dry and echo at full level.

@@ -1,0 +1,7 @@
+# Bars are matched by their loudness over time only, so anything with a
+# similar pulse can answer, whatever it sounds like.
+feature_focus = Rhythm
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -6

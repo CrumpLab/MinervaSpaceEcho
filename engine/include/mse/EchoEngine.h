@@ -3,6 +3,7 @@
 #include "mse/Features.h"
 #include "mse/HostClock.h"
 #include "mse/MemorySnapshot.h"
+#include "mse/MemoryView.h"
 #include "mse/Params.h"
 #include "mse/Retrieval.h"
 #include "mse/Spectral.h"
@@ -63,6 +64,10 @@ enum class Command
     UnclampAll,
     ClearUnclamped,
     ClearAll,
+    // Addressed to one trace by its serial (the argument):
+    ClampTrace,       // respects the clamp budget
+    UnclampTrace,
+    DeleteTrace,
 };
 
 // The MINERVA echo (plan §3 Mode A, §5 memory management):
@@ -100,13 +105,27 @@ public:
     bool takeSnapshot (MemorySnapshot& out);
     // Replaces memory with the snapshot at the next block (or at prepare()).
     void loadSnapshot (const MemorySnapshot& snapshot);
+    // Adds the snapshot's traces to memory at the next block, as the newest
+    // traces (see tracesFromAudio() in Import.h). Existing traces make room
+    // under the usual rule: clamped first, then newest.
+    void importTraces (const MemorySnapshot& additions);
+
+    // Memory matrix view for the UI. enableMemoryView() allocates it (call
+    // once, before or while processing); readMemoryView() returns the latest
+    // published picture, or nullptr if disabled. Single reader thread; the
+    // returned view stays valid until the next readMemoryView() call.
+    void enableMemoryView();
+    const MemoryView* readMemoryView() noexcept;
 
     // ---- any thread ----
-    void sendCommand (Command c) noexcept;
+    void sendCommand (Command c, uint64_t traceSerial = 0) noexcept;
     void requestClear() noexcept { sendCommand (Command::ClearAll); }
     EngineStats getStats() const noexcept;
 
     // ---- audio thread ----
+    // Queues a command from the audio thread itself (e.g. MIDI); it runs at
+    // the start of the next process() call.
+    void sendCommandFromAudioThread (Command c, uint64_t traceSerial = 0) noexcept;
     void setParams (const EngineParams& p) noexcept { params = p; }
     const EngineParams& getParams() const noexcept { return params; }
     // `sidechain` (optional) cues memory when Cue Source = Sidechain.
@@ -147,6 +166,7 @@ private:
     void clearHeads() noexcept;
     void adoptPendingStore() noexcept;
     void processCommands() noexcept;
+    void runCommand (Command c, uint64_t arg) noexcept; // inside a mutation
     double nominalLength (const HostClock& clock) const noexcept;
     int64_t recordLimit() const noexcept;
     void boundary (int64_t newBegin, double newNominal) noexcept;
@@ -186,6 +206,8 @@ private:
     void beginMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_acq_rel); }
     void endMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_release); }
     void publishStats() noexcept;
+    void publishView() noexcept;
+    void deleteTrace (int position) noexcept;
     float random01() noexcept;
 
     // non-real-time helpers
@@ -219,8 +241,10 @@ private:
 
     // command queue (single producer, single consumer)
     static constexpr int kQueueSize = 64;
-    std::array<std::atomic<int>, kQueueSize> commandQueue {};
+    std::array<std::atomic<uint64_t>, kQueueSize> commandQueue {}; // command | serial << 8
     std::atomic<uint32_t> queueHead { 0 }, queueTail { 0 };
+    std::array<uint64_t, 16> localCommands {};           // from the audio thread
+    int localCommandCount = 0;
 
     FeatureExtractor features, echoFeatures, scFeatures;
     FeatureVector probe {}, echoProbe {}, partialProbe {}, cue {}, frozenCue {};
@@ -322,6 +346,20 @@ private:
     int64_t fadeSamples = 0;
     bool captureArmed = false;
     bool lastCaptureParam = false;
+    bool lastTrigger[EngineParams::kNumTriggers] {};
+
+    // memory view (triple buffer: the audio thread fills `viewBack`, then swaps
+    // it with the middle; the reader takes the middle when it is newer)
+    static constexpr int kViewDirty = 4;
+    std::array<std::unique_ptr<MemoryView>, 3> viewBuffers;
+    std::atomic<int> viewMiddle { 1 };
+    int viewBack = 0, viewFront = 2;
+    std::atomic<bool> viewEnabled { false };
+    uint64_t viewVersion = 0;
+    uint32_t viewStoreEpoch = 0;
+    int64_t viewCountdown = 0;
+    std::vector<float> viewActivation;                    // per slot
+    std::vector<std::array<float, kNumHeads>> viewPlay;   // per slot
 
     // counters
     uint64_t segmentCount = 0, evictionCount = 0, mergeCount = 0, rejectionCount = 0;

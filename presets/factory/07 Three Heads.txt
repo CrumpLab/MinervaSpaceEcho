@@ -1,0 +1,6 @@
+# RE-201 mode 1+2+3: head 1 answers the last bar, heads 2 and 3 replay what
+# head 1 played one and two bars earlier, panned left and right.
+mode_selector = 1+2+3
+capacity = 100
+power = 9
+echo_level_db = -6

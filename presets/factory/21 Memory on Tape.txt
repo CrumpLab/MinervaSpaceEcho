@@ -1,0 +1,12 @@
+# The memory echo through the machine: gentle wow and flutter, drive,
+# feedback through a darkening EQ, and a spring.
+capacity = 100
+power = 3
+feedback = 0.5
+echo_level_db = -3
+wow = 0.3
+flutter = 0.25
+tape_drive = 0.35
+hiss_db = -64
+feedback_treble_db = -5
+spring_level_db = -14

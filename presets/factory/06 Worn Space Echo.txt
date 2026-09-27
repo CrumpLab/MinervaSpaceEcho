@@ -1,0 +1,13 @@
+# The classic machine: a 1-trace memory with wow, flutter, tape drive, hiss,
+# repeats that darken as they feed back, and a spring tail.
+capacity = 1
+feedback = 0.65
+echo_level_db = -3
+wow = 0.5
+flutter = 0.4
+tape_drive = 0.5
+hiss_db = -58
+feedback_bass_db = -3
+feedback_treble_db = -6
+spring_level_db = -12
+spring_decay = 2.5

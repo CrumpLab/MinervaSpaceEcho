@@ -544,6 +544,34 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Drag audio files in to seed memory.
 - MIDI control: capture, freeze, clear, head switching.
 - Preset system.
+- **Status:** implemented; awaiting a listen (and a look) in Live.
+  - The engine publishes a *memory view* ~30 times a second through a
+    lock-free triple buffer: per trace its serial, activation, what each
+    head is playing, level, strength, age, generation, merges, clamp state
+    and its quantised address (redrawn only when a trace's features change),
+    plus the last cue's address and the echo's content. The audio thread
+    never waits for the UI.
+  - Editor: the memory matrix (rows = traces, columns = the 384 address
+    values), lock / activation / head columns, Heard and Echo spectrograms,
+    a familiarity meter, trace inspector (clamp, delete), memory buttons,
+    tabbed parameter pages generated from the parameter table (irrelevant
+    settings dimmed), status bar. Rendered headless by `mse-ui-snapshot`
+    for docs and CI.
+  - Commands can address one trace by serial (clamp / unclamp / delete).
+  - Drag-and-drop or *Import Audio…*: files are decoded in the background,
+    cut at the current trace length and given addresses exactly as live
+    recording would (cosine > 0.95 against the engine's own). They join
+    memory as the newest traces without stopping audio (built off-thread,
+    adopted by buffer swap); optional clamping.
+  - MIDI notes from a base note (VST3 / standalone): capture, held freeze and
+    spectral freeze, clamp/unclamp/clear, Mode Selector. The memory actions
+    are also trigger parameters, for Live's MIDI Map and automation (AU too).
+  - Presets: 21 curated factory presets, the 33 listening examples and user
+    presets, all in the `mse-render` text format (the parser moved into the
+    engine). Presets reset unmentioned settings to defaults, but leave
+    session settings (budget, embedding, MIDI) alone.
+  - 105 engine tests (11 new) + plugin test (MIDI, presets, import, state),
+    clean under ASan/UBSan; pluginval passes at strictness 10.
 
 ### Stage 8: Polish and release
 - Optimization, parameter smoothing audit, edge cases (sample-rate changes,
