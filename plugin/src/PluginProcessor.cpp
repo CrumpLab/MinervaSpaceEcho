@@ -173,8 +173,9 @@ double MinervaSpaceEchoProcessor::getTailLengthSeconds() const
     const double trace = p.syncMode == mse::SyncMode::Tempo
                              ? mse::divisionQuarters (p.traceDivision, 4, 4) * 60.0 / bpm
                              : p.traceMs * 0.001;
-    // One repeat without feedback; a generous allowance with it.
-    return std::min (60.0, trace * (p.feedback > 0.0f ? 8.0 : 1.0));
+    // One repeat without feedback; a generous allowance with it; plus the spring's tail.
+    const double spring = p.springLevelDb > mse::kLevelOffDb ? p.springDecaySeconds : 0.0;
+    return std::min (60.0, trace * (p.feedback > 0.0f ? 8.0 : 1.0) + spring);
 }
 
 mse::HostClock MinervaSpaceEchoProcessor::readHostClock()

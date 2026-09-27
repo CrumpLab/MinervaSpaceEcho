@@ -13,6 +13,7 @@ add_library(mse_engine STATIC
     src/MemorySnapshot.cpp
     src/Params.cpp
     src/Retrieval.cpp
+    src/Tape.cpp
     src/TraceStore.cpp
     src/Wav.cpp
 )

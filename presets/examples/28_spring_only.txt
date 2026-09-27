@@ -1,0 +1,5 @@
+# RE-201 mode 12: spring reverb only, on the dry signal, no echo.
+echo_level_db = -60
+spring_level_db = -4
+spring_on_dry = on
+spring_decay = 3

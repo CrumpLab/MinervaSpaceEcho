@@ -20,6 +20,7 @@ const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
 const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
 const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
 const char* const kPlaybackChoices[] = { "Blend", "Voices", "Sample" };
+const char* const kMismatchChoices[] = { "Varispeed", "Cut", "Loop" };
 const char* const kSimilarityChoices[] = { "Hintzman", "Cosine" };
 const char* const kFeatureChoices[] = { "Continuous", "Ternary" };
 const char* const kNegativeChoices[] = { "Subtract", "Ignore", "Absolute" };
@@ -103,6 +104,17 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "negative_mode",      "Negative Activations",  ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kNegativeChoices),     true },
     { "normalization",      "Echo Normalization",    ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kNormChoices),         true },
     { "level_tracking",     "Echo Level Tracking",   ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
+    // tape character
+    { "length_mismatch",    "Length Mismatch",       ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kMismatchChoices),     true },
+    { "wow",                "Wow",                   ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "flutter",            "Flutter",               ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "tape_drive",         "Tape Drive",            ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "hiss_db",            "Hiss",                  ParamType::Float,  kGateOffDb, -30, kGateOffDb, 0, "dB", NOCHOICE,                   true },
+    { "feedback_bass_db",   "Feedback Bass",         ParamType::Float,  -12,  12,     0,     0,    "dB",     NOCHOICE,                      true },
+    { "feedback_treble_db", "Feedback Treble",       ParamType::Float,  -12,  12,     0,     0,    "dB",     NOCHOICE,                      true },
+    { "spring_level_db",    "Spring Level",          ParamType::Float,  kLevelOffDb, 6, kLevelOffDb, 0, "dB", NOCHOICE,                   true },
+    { "spring_decay",       "Spring Decay",          ParamType::Float,  0.3f, 6,      2,     0,    "s",      NOCHOICE,                      true },
+    { "spring_on_dry",      "Spring On Dry",         ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
     // output
     { "feedback",           "Feedback",              ParamType::Float,  0,    1.2f,   0,     0,    "",       NOCHOICE,                      true },
     { "echo_level_db",      "Echo Level",            ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
@@ -226,6 +238,17 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.negativeMode = static_cast<NegativeMode> (idx (kNegativeMode));
     p.normalization = static_cast<Normalization> (idx (kNormalization));
     p.levelTracking = v (kLevelTracking);
+
+    p.lengthMismatch = static_cast<LengthMismatch> (idx (kLengthMismatch));
+    p.wow = v (kWow);
+    p.flutter = v (kFlutter);
+    p.tapeDrive = v (kTapeDrive);
+    p.hissDb = v (kHissDb);
+    p.feedbackBassDb = v (kFeedbackBassDb);
+    p.feedbackTrebleDb = v (kFeedbackTrebleDb);
+    p.springLevelDb = v (kSpringLevelDb);
+    p.springDecaySeconds = v (kSpringDecay);
+    p.springOnDry = on (kSpringOnDry);
 
     p.feedback = v (kFeedback);
     p.echoLevelDb = v (kEchoLevelDb);

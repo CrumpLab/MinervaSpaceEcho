@@ -15,6 +15,7 @@ namespace mse {
 struct TraceRecord
 {
     int64_t begin = 0;                       // position of audio[.][0] within the segment
+    double nominalLength = 0.0;              // trace length setting when recorded (samples; 0 = unknown)
     std::vector<std::vector<float>> audio;   // [channel][sample], the valid [begin, end) region
     uint64_t serial = 0;
     float rms = 0.0f;

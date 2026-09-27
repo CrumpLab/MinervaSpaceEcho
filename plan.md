@@ -493,6 +493,21 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Varispeed playback for length mismatch (pitch follows tape speed).
 - Wow/flutter, saturation, hiss, feedback-path bass/treble EQ.
 - Spring-reverb-style tail (optional).
+- **Status:** implemented; awaiting a listen in Live.
+  - Every trace records its nominal length (the trace-length setting when it
+    was recorded; saved with memory). Length Mismatch = Varispeed plays it at
+    recorded / current length speed. Halving the repeat rate on frozen memory
+    plays old traces an octave up (verified at 880 Hz from a 440 Hz trace).
+    Cut and Loop are the alternatives. Rolling-mode continuations always play
+    at their own speed.
+  - Wow/flutter modulate the read position of every playing trace
+    (fractional reads). Drive is tanh(kx)/k on the echo bus; hiss is
+    differenced white noise; feedback EQ is RBJ shelves inside the feedback
+    path; the spring is 12 stretched allpass stages in a damped feedback
+    loop per channel (43/47 ms), high-passed at 150 Hz, decay set by T60.
+  - All defaults are neutral, so every earlier test (including exact-delay
+    equivalence) still passes; 88 engine tests + plugin state test, clean
+    under ASan/UBSan. Full tape character costs ~70–110x realtime.
 
 ### Stage 6: Spectral engine
 - Blend traces as **magnitude spectra** (STFT resynthesis). Avoids

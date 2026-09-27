@@ -22,6 +22,7 @@ enum class HeadMode { Off, Delay, Iterative };
 enum class Playback { Blend, Voices, Sample };
 enum class CueSource { Input, Sidechain, Random, Frozen };
 enum class FeatureFocus { Full, Rhythm, Timbre };
+enum class LengthMismatch { Varispeed, Cut, Loop };
 
 // RE-201-style head combinations. Custom uses the per-head settings.
 enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
@@ -108,6 +109,18 @@ struct EngineParams
     Normalization normalization = Normalization::Sum;
     float levelTracking = 1.0f;
 
+    // tape character (plan §4.5, Stage 5)
+    LengthMismatch lengthMismatch = LengthMismatch::Varispeed; // traces recorded at another length
+    float wow = 0.0f;                                  // slow speed wobble (0..1)
+    float flutter = 0.0f;                              // fast speed wobble (0..1)
+    float tapeDrive = 0.0f;                            // echo saturation (0..1)
+    float hissDb = kGateOffDb;                         // tape hiss level (-100 = off)
+    float feedbackBassDb = 0.0f;                       // low shelf in the feedback path
+    float feedbackTrebleDb = 0.0f;                     // high shelf in the feedback path
+    float springLevelDb = kLevelOffDb;                 // spring reverb return (-60 = off)
+    float springDecaySeconds = 2.0f;
+    bool springOnDry = false;                          // spring also on the dry signal (RE-201 modes 8-11)
+
     // output
     float feedback = 0.0f;
     float echoLevelDb = 0.0f;
@@ -144,6 +157,8 @@ enum ParamIndex
     kEchoToneHz, kIntensityToTone, kIntensityToFeedback,
     kPower, kSimilarity, kFeatureMode, kTernaryThreshold, kSelfMatch, kCueGateDb, kNegativeMode,
     kNormalization, kLevelTracking,
+    kLengthMismatch, kWow, kFlutter, kTapeDrive, kHissDb, kFeedbackBassDb, kFeedbackTrebleDb,
+    kSpringLevelDb, kSpringDecay, kSpringOnDry,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,
     kEmbedMemory,
     kNumParams

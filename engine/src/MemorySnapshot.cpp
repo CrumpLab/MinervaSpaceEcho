@@ -30,6 +30,7 @@ json traceMeta (const TraceRecord& t)
 {
     return json {
         { "begin", t.begin },
+        { "nominal_length", t.nominalLength },
         { "length", t.length() },
         { "serial", t.serial },
         { "rms", t.rms },
@@ -45,6 +46,7 @@ json traceMeta (const TraceRecord& t)
 void readTraceMeta (const json& j, TraceRecord& t)
 {
     t.begin = j.at ("begin").get<int64_t>();
+    t.nominalLength = j.value ("nominal_length", 0.0);
     t.serial = j.value ("serial", uint64_t { 0 });
     t.rms = j.value ("rms", 0.0f);
     t.strength = j.value ("strength", 1.0f);
@@ -233,6 +235,7 @@ void resampleSnapshot (MemorySnapshot& s, double newRate)
     for (auto& t : s.traces)
     {
         t.begin = static_cast<int64_t> (std::llround (static_cast<double> (t.begin) * ratio));
+        t.nominalLength *= ratio;
         for (auto& ch : t.audio)
         {
             const size_t n = ch.size();

@@ -34,6 +34,7 @@ struct TraceSlot
     int frameBegin = 0;       // valid frames: [frameBegin, frameEnd)
     int frameEnd = 0;
 
+    double nominalLen = 0.0;  // trace length setting when recorded (varispeed reference); 0 = unknown
     uint64_t serial = 0;      // store order; age in segments = store serial - serial
     float rms = 0.0f;         // mono RMS of the recorded audio
     float strength = 1.0f;    // decays over time; multiplies the trace's activation
@@ -47,6 +48,7 @@ struct TraceSlot
     {
         begin = end = 0;
         frameBegin = frameEnd = 0;
+        nominalLen = 0.0;
         serial = 0;
         rms = 0.0f;
         strength = 1.0f;

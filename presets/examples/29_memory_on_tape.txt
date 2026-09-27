@@ -1,0 +1,12 @@
+# The memory echo with tape character: 100 traces, feedback through a darkening
+# EQ, gentle wow and flutter, drive and a spring. Dry + echo.
+capacity = 100
+power = 3
+feedback = 0.5
+echo_level_db = -3
+wow = 0.3
+flutter = 0.25
+tape_drive = 0.35
+hiss_db = -64
+feedback_treble_db = -5
+spring_level_db = -14

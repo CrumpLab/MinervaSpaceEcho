@@ -5,6 +5,7 @@
 #include "mse/MemorySnapshot.h"
 #include "mse/Params.h"
 #include "mse/Retrieval.h"
+#include "mse/Tape.h"
 #include "mse/TraceStore.h"
 
 #include <array>
@@ -125,8 +126,10 @@ private:
         float toneCoeff;   // wear-tone one-pole coefficient (1 = bypass)
         float z[2];
         float gain[2];     // per output channel: weight x tracking x head level x pan
-        double rate;       // playback speed (voices detune); 1 = exact
+        double rate;       // playback speed (varispeed x voice detune); 1 = exact
         int64_t anchor;    // playlist pos where varispeed reading started
+        double anchorTrace; // trace position read at `anchor`
+        int64_t loopLen;   // > 0: loop the trace (Length Mismatch = Loop)
     };
     struct Playlist
     {
@@ -240,6 +243,19 @@ private:
     float toneCoeff = 1.0f;
     bool toneActive = false;
     float feedbackNow = 0.0f;
+
+    // tape character
+    double installNominal = 0.0;    // segment length the echo being installed will play in (0: no varispeed)
+    ShelfEq feedbackEq;
+    TapeMotion motion;
+    SpringReverb spring;
+    std::vector<float> motionBuf;
+    bool motionActive = false;
+    float driveK = 0.0f;
+    float hissGain = 0.0f, hissHp[kMaxChannels] {};
+    uint64_t hissRng = 0x9e3779b97f4a7c15ull;
+    float springGain = 0.0f;
+    bool feedbackEqActive = false;
     float toneZ[kMaxChannels] {};
 
     // live cueing

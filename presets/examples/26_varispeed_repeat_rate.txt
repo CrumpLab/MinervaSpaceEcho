@@ -1,0 +1,9 @@
+# Varispeed: 8 bars are stored as 1-bar traces, then memory is frozen and the
+# trace length (repeat rate) drops to half a bar. Old traces now play at double
+# speed, an octave up, like turning up a Space Echo's repeat rate (echo only).
+capacity = 100
+power = 9
+length_mismatch = Varispeed
+dry_level_db = -60
+@8.25 freeze = on
+@8.25 trace_division = 1/2

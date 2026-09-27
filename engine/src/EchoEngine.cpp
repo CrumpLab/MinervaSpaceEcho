@@ -87,6 +87,10 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
     echoFeatures.prepare (sampleRate);
     scFeatures.prepare (sampleRate);
     scMonoBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
+    feedbackEq.prepare (sampleRate);
+    motion.prepare (sampleRate);
+    spring.prepare (sampleRate);
+    motionBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
     envStep = std::max (1, static_cast<int> (std::lround (sampleRate / 1000.0)));
     envProduced = 0;
     envAcc = 0.0;
@@ -210,6 +214,7 @@ std::unique_ptr<TraceStore> EchoEngine::buildStoreFrom (const MemorySnapshot& so
         TraceSlot meta;
         meta.begin = t.begin;
         meta.end = t.begin + t.length();
+        meta.nominalLen = t.nominalLength > 0.0 ? t.nominalLength : static_cast<double> (meta.end);
         meta.serial = t.serial;
         meta.rms = t.rms;
         meta.strength = t.strength;
@@ -298,6 +303,7 @@ bool EchoEngine::takeSnapshot (MemorySnapshot& out)
                 t.audio.resize (static_cast<size_t> (snap.channels));
                 for (int c = 0; c < snap.channels; ++c)
                     t.audio[static_cast<size_t> (c)].assign (s.audio[c] + begin, s.audio[c] + end);
+                t.nominalLength = s.nominalLen;
                 t.serial = s.serial;
                 t.rms = s.rms;
                 t.strength = s.strength;
@@ -640,6 +646,19 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     const float fam = 2.0f * familiarity - 1.0f; // -1 unfamiliar .. +1 familiar
     feedbackNow = std::clamp (params.feedback + 0.5f * params.intensityToFeedback * fam, 0.0f, 1.2f);
     toneActive = params.echoToneHz < 19999.0f || params.intensityToTone != 0.0f;
+
+    // Tape character.
+    motionActive = params.wow > 0.0f || params.flutter > 0.0f;
+    driveK = params.tapeDrive > 0.0f ? 1.0f + 4.0f * params.tapeDrive : 0.0f;
+    hissGain = params.hissDb > kGateOffDb ? std::pow (10.0f, params.hissDb / 20.0f) : 0.0f;
+    feedbackEq.set (params.feedbackBassDb, params.feedbackTrebleDb);
+    feedbackEqActive = ! feedbackEq.isFlat();
+    const float newSpringGain = levelToGain (params.springLevelDb);
+    if (newSpringGain > 0.0f && springGain == 0.0f)
+        spring.reset(); // start from silence, not an old tail
+    springGain = newSpringGain;
+    if (springGain > 0.0f)
+        spring.setDecay (params.springDecaySeconds);
     if (toneActive)
     {
         const double fc = std::clamp (params.echoToneHz * std::pow (2.0, 3.0 * params.intensityToTone * fam), 20.0,
@@ -909,6 +928,7 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, c
     spare.end = std::min (writeIdx, spare.maxLen);
     spare.frameBegin = fx.sinkBegin();
     spare.frameEnd = fx.sinkEnd();
+    spare.nominalLen = segNominal;
     spare.rms = rms;
     spare.generation = generation;
     spare.strength = 1.0f;
@@ -1019,6 +1039,7 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
             const auto result = gated ? RetrievalResult {} : retrieve (cue, *store, rs, weights.data());
             if (! held)
                 noteUse (result);
+            installNominal = newNominal;
             installMain (result, liveCueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
             updateOtherHeads (mainTracking, newBegin);
         }
@@ -1226,8 +1247,21 @@ void EchoEngine::installEcho (int head, const EchoWeight* src, int n, float trac
         e.z[0] = e.z[1] = 0.0f;
         e.gain[0] = g * std::min (1.0f, 1.0f - pan);
         e.gain[1] = g * std::min (1.0f, 1.0f + pan);
-        e.rate = cents != 0.0f ? std::pow (2.0, cents / 1200.0) : 1.0;
+        // Length mismatch: a trace recorded at another trace length either
+        // changes speed to fit (and pitch, like tape), is cut, or loops.
+        double fit = 1.0;
+        e.loopLen = 0;
+        if (installNominal > 0.0 && s.nominalLen > 0.0)
+        {
+            const double ratio = s.nominalLen / installNominal;
+            if (params.lengthMismatch == LengthMismatch::Varispeed && std::abs (ratio - 1.0) > 1.0e-9)
+                fit = ratio;
+            else if (params.lengthMismatch == LengthMismatch::Loop && static_cast<double> (s.end - s.begin) < installNominal)
+                e.loopLen = s.end - s.begin;
+        }
+        e.rate = fit * (cents != 0.0f ? std::pow (2.0, cents / 1200.0) : 1.0);
         e.anchor = pos;
+        e.anchorTrace = static_cast<double> (pos) * fit + static_cast<double> (e.offset);
     }
     cur.pos = pos;
     cur.rampPos = 0;
@@ -1384,6 +1418,7 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     }
 
     // Memories play in step with the bar being played (position writeIdx).
+    installNominal = segNominal;
     installMain (result, cueRms, writeIdx, smooth, smooth);
 }
 
@@ -1558,6 +1593,7 @@ void EchoEngine::continueRollingSearch (int64_t budget) noexcept
     }
     const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
     // installMain copies the result from `weights`; keep the refined offsets there.
+    installNominal = 0.0; // continuations play at their own speed
     installMain (result, rolling.cueRms, 0, smooth, smooth);
     stats.cueLatencyMs.store (static_cast<float> (1000.0 * static_cast<double> (elapsed) / sampleRate),
                               std::memory_order_relaxed);
@@ -1586,8 +1622,9 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
                 float* dst = echoBuf[static_cast<size_t> (c)].data();
                 float z = e.z[c];
                 // At normal speed only the samples inside the trace need visiting.
+                const bool exact = e.rate == 1.0 && ! motionActive && e.loopLen == 0;
                 int iBegin = 0, iEnd = len;
-                if (e.rate == 1.0)
+                if (exact)
                 {
                     const int64_t base = pl.pos + e.offset;
                     iBegin = static_cast<int> (std::clamp<int64_t> (e.begin - base, 0, len));
@@ -1598,7 +1635,7 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
                     // Read position in the trace (varispeed for detuned voices).
                     float x;
                     int64_t t;
-                    if (e.rate == 1.0)
+                    if (exact)
                     {
                         t = pl.pos + e.offset + i;
                         if (t < e.begin || t >= e.end)
@@ -1607,13 +1644,23 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
                     }
                     else
                     {
-                        const double tf = static_cast<double> (e.anchor + e.offset)
-                                          + static_cast<double> (pl.pos + i - e.anchor) * e.rate;
+                        // Varispeed / detune / wow & flutter / loop: fractional read.
+                        double tf = e.anchorTrace + static_cast<double> (pl.pos + i - e.anchor) * e.rate;
+                        if (motionActive)
+                            tf -= motionBuf[static_cast<size_t> (i)];
+                        if (e.loopLen > 0)
+                        {
+                            double rel = std::fmod (tf - static_cast<double> (e.begin), static_cast<double> (e.loopLen));
+                            if (rel < 0.0)
+                                rel += static_cast<double> (e.loopLen);
+                            tf = static_cast<double> (e.begin) + rel;
+                        }
                         t = static_cast<int64_t> (std::floor (tf));
-                        if (t < e.begin || t + 1 >= e.end)
+                        if (t < e.begin || t >= e.end)
                             continue;
+                        const int64_t t1 = t + 1 < e.end ? t + 1 : (e.loopLen > 0 ? e.begin : t);
                         const auto frac = static_cast<float> (tf - static_cast<double> (t));
-                        x = src[t] + frac * (src[t + 1] - src[t]);
+                        x = src[t] + frac * (src[t1] - src[t]);
                     }
                     float g = chanGain * (hg0 + hgInc * static_cast<float> (i));
                     if (fade > 0)
@@ -1647,6 +1694,8 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
 {
     for (int c = 0; c < ioChannels; ++c)
         std::fill_n (echoBuf[static_cast<size_t> (c)].data(), len, 0.0f);
+    if (motionActive)
+        motion.fill (motionBuf.data(), len, params.wow, params.flutter);
     for (int h = 0; h < kNumHeads; ++h)
     {
         accumulate (headCurrent[static_cast<size_t> (h)], h, ioChannels, offset, len);
@@ -1665,6 +1714,28 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
                 e[i] = z;
             }
             toneZ[c] = z;
+        }
+
+    // Tape drive (soft saturation, unity gain for small signals) and hiss.
+    if (driveK > 0.0f || hissGain > 0.0f)
+        for (int c = 0; c < ioChannels; ++c)
+        {
+            float* e = echoBuf[static_cast<size_t> (c)].data();
+            for (int i = 0; i < len; ++i)
+            {
+                float v = e[i];
+                if (driveK > 0.0f)
+                    v = std::tanh (driveK * v) / driveK;
+                if (hissGain > 0.0f)
+                {
+                    hissRng = hissRng * 6364136223846793005ull + 1442695040888963407ull;
+                    const float white = static_cast<float> (static_cast<int64_t> (hissRng >> 32) - 2147483648LL) * (1.0f / 2147483648.0f);
+                    const float hiss = white - hissHp[c]; // first difference: bright, hiss-like
+                    hissHp[c] = white;
+                    v += hissGain * hiss;
+                }
+                e[i] = v;
+            }
         }
 
     if (sidechainActive)
@@ -1696,11 +1767,17 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             float* ch = io[c] + offset;
             const float x = ch[i];
             const float e = echoBuf[static_cast<size_t> (c)][static_cast<size_t> (i)];
-            rec[c] = recordEchoOnly ? e : softClip (x + fb * e);
+            float fbSignal = fb * e;
+            if (feedbackEqActive)
+                fbSignal = feedbackEq.process (c, fbSignal); // RE-201 bass/treble act on the repeats
+            rec[c] = recordEchoOnly ? e : softClip (x + fbSignal);
             ech[c] = e;
             mono += rec[c];
             echoMono += e;
-            ch[i] = dryGain * x + echoGain * e;
+            float out = dryGain * x + echoGain * e;
+            if (springGain > 0.0f)
+                out += springGain * spring.process (c, echoGain * e + (params.springOnDry ? dryGain * x : 0.0f));
+            ch[i] = out;
         }
         for (int c = 0; c < storeCh; ++c)
         {

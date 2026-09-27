@@ -8,7 +8,7 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 4 (heads and chorus).** The plugin cuts the input into traces
+**Status: Stage 5 (tape character).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
@@ -18,7 +18,9 @@ consolidation, forgetting, echo re-encoding, and saving and loading memory.
 Stage 3 lets the live input cue memory *while it plays*: progressively within
 the bar, or with no bar grid at all (rolling). Stage 4 adds RE-201-style
 playback heads, chorus voices, random sampling, and other cue sources
-(sidechain, random, frozen).
+(sidechain, random, frozen). Stage 5 adds the machine itself: varispeed,
+wow and flutter, tape drive, hiss, bass/treble in the feedback path, and a
+spring reverb.
 
 ## How it behaves
 
@@ -84,6 +86,12 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Negative Activations** | Subtract (phase-inverted, true MINERVA), Ignore, or Absolute. |
 | **Echo Normalization** | Sum (constant loudness), Max, or Familiarity (echo is quiet when the cue resembles nothing in memory). |
 | **Echo Level Tracking** | 1: echo level follows the cue's level, like a tape repeat, so feedback decays. 0: memories return at their own level. |
+| **Length Mismatch** | When a stored trace was recorded at a different trace length (you changed the repeat rate or the tempo): **Varispeed** plays it faster or slower to fit, so its pitch shifts like tape; **Cut** plays it as recorded; **Loop** repeats a shorter trace to fill the segment. |
+| **Wow** / **Flutter** | Slow (drifting, ~0.5 Hz, up to 6 ms) and fast (~7 Hz, up to 0.5 ms) speed wobble of the echo. |
+| **Tape Drive** | Soft saturation of the echo (unity for quiet signals), which also shapes what feeds back. |
+| **Hiss** | Tape noise on the echo (−100 dB = off). With feedback it gets recorded along with the repeats. |
+| **Feedback Bass** / **Feedback Treble** | ±12 dB shelves (250 Hz / 3 kHz) inside the feedback path, like the RE-201's controls: each repeat gets darker or thinner. |
+| **Spring Level** / **Spring Decay** / **Spring On Dry** | A spring-reverb tail on the echo (and optionally on the dry signal, as in the RE-201's reverb modes). −60 dB = off. |
 | **Feedback** | Echo mixed back into what gets recorded (soft-clipped; >1 allowed). |
 | **Echo Level** / **Dry Level** / **Output Gain** | Mix. −60 dB = off. |
 | **Edge Fade** | Fade length at trace edges and when the echo changes (declicking). |
