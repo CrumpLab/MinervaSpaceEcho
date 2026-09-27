@@ -62,15 +62,36 @@ cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$WORK/zip/"
 ( cd "$WORK/zip" && ditto -c -k --sequesterRsrc . "$OUT/$STEM.zip" )
 
 # ---- installer ------------------------------------------------------------------
-component_pkg() { # root, install location, identifier, output
-    pkgbuild --analyze --root "$1" "$WORK/components.plist"
-    # Install exactly where we say, even if a copy of the bundle exists elsewhere.
-    /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/components.plist"
+component_pkg() { # root, install location, identifier, output, bundle name
+    # Our own component list (pkgbuild --analyze doesn't always describe
+    # plug-in bundles): install exactly where we say, even if a copy of the
+    # bundle exists elsewhere on the machine.
+    local bundle="$5"
+    cat > "$WORK/components.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>BundleHasStrictIdentifier</key>
+        <true/>
+        <key>BundleIsRelocatable</key>
+        <false/>
+        <key>BundleIsVersionChecked</key>
+        <false/>
+        <key>BundleOverwriteAction</key>
+        <string>upgrade</string>
+        <key>RootRelativeBundlePath</key>
+        <string>$bundle</string>
+    </dict>
+</array>
+</plist>
+PLIST
     pkgbuild --root "$1" --component-plist "$WORK/components.plist" --install-location "$2" \
         --identifier "$3" --version "$VERSION" "$4"
 }
-component_pkg "$WORK/au" "/Library/Audio/Plug-Ins/Components" "$ID.au" "$WORK/au.pkg"
-component_pkg "$WORK/vst3" "/Library/Audio/Plug-Ins/VST3" "$ID.vst3" "$WORK/vst3.pkg"
+component_pkg "$WORK/au" "/Library/Audio/Plug-Ins/Components" "$ID.au" "$WORK/au.pkg" "$NAME.component"
+component_pkg "$WORK/vst3" "/Library/Audio/Plug-Ins/VST3" "$ID.vst3" "$WORK/vst3.pkg" "$NAME.vst3"
 
 cp "$ROOT/LICENSE" "$WORK/resources/LICENSE.txt"
 cat > "$WORK/resources/welcome.txt" <<EOF
