@@ -17,6 +17,7 @@ const char* midiActionName (MidiAction a) noexcept
         case MidiAction::ClearUnclamped: return "Clear Unclamped";
         case MidiAction::ClearAll:       return "Clear All";
         case MidiAction::ModeSelector:   return "Mode Selector";
+        case MidiAction::EchoChain:      return "Echo Chain (hold)";
         case MidiAction::None:           break;
     }
     return "";

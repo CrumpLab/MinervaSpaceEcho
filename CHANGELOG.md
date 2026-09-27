@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0] - 2026-09-27
+
+### Stage 9: sequential context
+After Jamieson and Mewhort (2009), who extended MINERVA to the serial
+reaction-time task, and in the spirit of Elman's (1990) context units.
+
+- Every trace also stores the previous segment's address: [n−1 | n]. Trace
+  audio is unchanged. Context is recorded always, saved with memory (an
+  optional `context` field; older files load without it) and built for
+  imported audio from the file's previous piece.
+- **Sequence Context** and **Context Cue**: **Predict Next** (the segment just
+  played against traces' n−1 halves: memory anticipates the next segment),
+  **Match Both** (sequence-sensitive recall, with **Context Weight**) or
+  **Current Only**. Works with Segment and Progressive cueing and iterative
+  heads.
+- **Echo Chain** cue source: each echo's expected next segment cues the next
+  echo, so memory walks through learned sequences. **Chain Input** blends in
+  the live input (0 = free-running). MIDI base note + 8 holds the chain.
+- Memory matrix and side panel show [n−1 | n]; new Sequence page.
+- Factory presets *Anticipate*, *Sequence Memory*, *Dreaming Sequencer*;
+  examples 34–37; a Sequences page in the manual.
+- Off by default: with Sequence Context off, output is unchanged.
+
 ## [0.1.0] - 2026-09-27
 
 First release: every stage of `plan.md` is in place. It has been tested

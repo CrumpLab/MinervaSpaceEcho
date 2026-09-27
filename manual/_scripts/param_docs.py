@@ -42,9 +42,14 @@ DOCS = {
     "rolling_interval_ms": "Rolling: how often memory is searched.",
     "lookahead_ms": "Prediction: play memory this far ahead of the current position, so you hear what came next last time.",
     "cue_smoothing_ms": "Crossfade whenever a live cue (Progressive or Rolling) changes the echo.",
-    "cue_source": "What cues memory: the **Input**, the **Sidechain** (another track routed to the plug-in's sidechain input), a **Random** address (memory dreams), or **Frozen** (the last live cue, held).",
+    "cue_source": "What cues memory: the **Input**, the **Sidechain** (another track routed to the plug-in's sidechain input), a **Random** address (memory dreams), **Frozen** (the last live cue, held), or **Echo Chain** (each echo cues the next; see [Sequences](../guide/sequences.qmd)).",
     "feature_focus": "Compare **Full** addresses, **Rhythm** only (loudness over time) or **Timbre** only (average spectrum). Segment and Progressive cueing.",
     "recency": "Favour recently stored traces (0 = no preference).",
+    # sequential context
+    "sequence_context": "Every trace also stores the previous segment's address, [n−1 | n]. On: cues use that context (Context Cue). Context is recorded either way, so you can switch it on later.",
+    "context_cue": "**Match Both**: the last two segments against [n−1 | n] (sequence-sensitive recall). **Predict Next**: the last segment against traces' n−1 halves, so you hear what came next last time. **Current Only**: ordinary MINERVA II.",
+    "context_weight": "Match Both: how much the n−1 half counts (0 = like Current Only, 1 = as much as the current half).",
+    "chain_input": "Echo Chain: how much the live input steers the chain. 0 = memory walks on its own; 1 = the same as Predict Next from the input.",
     # heads
     "mode_selector": "The RE-201's head combinations: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3 (delay heads), Iterative 1+2+3, or **Custom** (use the per-head settings below).",
     "head1_level_db": "Level of head 1, the main echo.",

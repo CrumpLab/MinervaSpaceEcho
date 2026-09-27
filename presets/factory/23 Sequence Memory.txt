@@ -1,0 +1,9 @@
+# Sequence context, Match Both: a bar is recalled together with the bar before
+# it, so the same bar answers differently depending on how you got there.
+sequence_context = on
+context_cue = Match Both
+context_weight = 1
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -6

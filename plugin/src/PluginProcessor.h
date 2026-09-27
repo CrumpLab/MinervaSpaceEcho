@@ -111,7 +111,7 @@ private:
 
     // MIDI (audio thread): held freezes and a Mode Selector choice that
     // applies at once and is written to the parameter by the timer.
-    bool midiFreeze = false, midiSpectralFreeze = false;
+    bool midiFreeze = false, midiSpectralFreeze = false, midiChain = false;
     int modeOverride = -1;
     double modeOverrideSamples = 0.0;
     std::atomic<int> pendingModeParam { -1 };

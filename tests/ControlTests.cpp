@@ -317,7 +317,8 @@ TEST_CASE ("MIDI note map")
     REQUIRE (midiMappingFor (36, 36).action == MidiAction::Capture);
     REQUIRE (midiMappingFor (37, 36).action == MidiAction::Freeze);
     REQUIRE (midiMappingFor (43, 36).action == MidiAction::ClearAll);
-    REQUIRE (midiMappingFor (44, 36).action == MidiAction::None);
+    REQUIRE (midiMappingFor (44, 36).action == MidiAction::EchoChain);
+    REQUIRE (midiMappingFor (45, 36).action == MidiAction::None);
     REQUIRE (midiMappingFor (48, 36).action == MidiAction::ModeSelector);
     REQUIRE (midiMappingFor (48, 36).value == 0);
     REQUIRE (midiMappingFor (56, 36).value == 8);

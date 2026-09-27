@@ -1,0 +1,78 @@
+---
+title: "Sequences"
+subtitle: "Sequential context, anticipation and the echo chain"
+---
+
+MINERVA II stores each experience on its own. Jamieson and Mewhort (2009) showed that the same model can learn
+*sequences*, as people do in the serial reaction-time task, if each trace also holds the event that came before
+it. The idea is close to an Elman network, which feeds its previous state back in as context for the next input.
+MINERVA Space Echo can work the same way.
+
+## Traces with context
+
+Every trace stores two addresses side by side, **[n−1 | n]**: the segment before it and the segment itself. The
+audio is still just the segment itself; the context only changes which traces are recalled. In the memory matrix
+each row then shows both halves, with a divider between them.
+
+![With Sequence Context on, each row is [n−1 | n] and the Echo panel shows the expected next segment.](../images/screenshot-sequence.png){fig-alt="The plug-in window with sequence context: each matrix row has two halves separated by a divider."}
+
+Context is always recorded, so memory that was built with **Sequence Context** off can use it the moment you turn
+it on. The first segment after starting, clearing or jumping the transport has an empty context half. Imported
+audio gets the previous piece of the same file as context.
+
+## Asking memory with context
+
+Turn on **Sequence Context** (Main or Sequence page) and choose a **Context Cue**:
+
+| Context Cue | The cue is | What you hear in the next segment |
+|---|---|---|
+| **Predict Next** | the segment just played, compared with each trace's **n−1** half | What *followed* similar material before: memory's expectation of the next segment, played as it happens. This is Jamieson and Mewhort's anticipation. |
+| **Match Both** | the last two segments, compared with **[n−1 \| n]** | The trace that matches both the segment just played *and* how you got there. The same bar is recalled differently after different bars. **Context Weight** sets how much the n−1 half counts. |
+| **Current Only** | the segment just played, compared with **n** | Ordinary MINERVA II recall; context is ignored. |
+
+The similarity with two halves is the weighted mean of each half's similarity, so with Context Weight at 0 Match Both
+is the same as Current Only.
+
+::: {.callout-note}
+## One segment of context
+Traces remember only the segment before them. After a segment that has been followed by different things, Predict
+Next blends everything that ever followed it; Match Both uses the extra segment of history to tell the cases apart.
+:::
+
+In **Progressive** cue mode the bar so far is compared with the same stretch of each trace's context half (Predict
+Next) or current half (Match Both). **Rolling** cue mode searches the audio itself, not addresses, so it ignores
+context. **Iterative** heads use the same rule: with Predict Next, Iterative 1+2+3 plays the next three expected
+segments at once.
+
+## The echo chain
+
+Each echo has content of its own: the blend of the answering traces' addresses. With Predict Next, its *n* half
+is memory's expectation of the next segment. Set **Cue Source** to **Echo Chain** and that expectation becomes the
+next cue, so each echo cues the next one and memory walks through the sequences it has learned, one segment at a
+time.
+
+**Chain Input** decides how much the live input steers the walk:
+
+- **0**: memory plays on its own and ignores the input: a sequencer driven by its own expectations.
+- **In between**: the input pulls the walk toward what is being played now, much as an Elman network's context
+  units mix the previous state with the new input.
+- **1**: the same as Predict Next from the input.
+
+The chain starts from the last segment you played. If memory stops answering (it's empty, or nothing is similar),
+it restarts from the input. Hold MIDI note *base + 8* to switch to the chain while the note is down.
+
+Other settings shape the walk: a high **Activation Power** makes it follow the most expected path, a low one blends
+possible continuations, and **Playback = Sample** makes it a random walk that picks one continuation at each step.
+**Freeze Memory** keeps the chain from recording its own output.
+
+## Try it
+
+- **22 Anticipate** (Predict Next), **23 Sequence Memory** (Match Both) and **24 Dreaming Sequencer**
+  (Echo Chain) in the preset menu.
+- The listening examples **34** to **37**.
+
+## References
+
+- Jamieson, R. K., & Mewhort, D. J. K. (2009). Applying an exemplar model to the serial reaction-time task:
+  Anticipating from experience. *Quarterly Journal of Experimental Psychology, 62*(9), 1757–1783.
+- Elman, J. L. (1990). Finding structure in time. *Cognitive Science, 14*(2), 179–211.

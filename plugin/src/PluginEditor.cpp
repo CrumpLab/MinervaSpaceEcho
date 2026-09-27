@@ -143,7 +143,7 @@ juce::String MinervaSpaceEchoEditor::midiNoteText() const
         juce::String what = mse::midiActionName (m.action);
         if (m.action == mse::MidiAction::ModeSelector)
             what = "Mode " + juce::String (mse::paramSpecs()[mse::kModeSelector].choices[m.value]);
-        text << name << " " << what << (k == 7 || k == mse::kMidiModeOffset + mse::kMidiModeCount - 1 ? "\n" : "   ");
+        text << name << " " << what << (k == 8 || k == mse::kMidiModeOffset + mse::kMidiModeCount - 1 ? "\n" : "   ");
     }
     return text;
 }
@@ -261,7 +261,8 @@ void MinervaSpaceEchoEditor::paint (juce::Graphics& g)
     const juce::FontOptions statsFont (12.0f);
     const int statsW = juce::GlyphArrangement::getStringWidthInt (statsFont, memoryText) + 12;
     cols.setRight (c.getRight() - statsW);
-    const juce::String address ("ADDRESS  (16 time slots x 24 bands)");
+    const juce::String address (sequenceView ? "ADDRESS  [n-1 | n]  (each: 16 time slots x 24 bands)"
+                                             : "ADDRESS  (16 time slots x 24 bands)");
     g.drawText (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (11.0f, juce::Font::bold), address) < cols.getWidth()
                     ? address : juce::String ("ADDRESS"),
                 cols, juce::Justification::centredLeft);
@@ -443,6 +444,7 @@ void MinervaSpaceEchoEditor::refresh()
 {
     if (const auto* view = processor.readMemoryView())
     {
+        sequenceView = view->sequence;
         matrix.update (*view);
         side.update (*view, matrix.getSelected());
     }

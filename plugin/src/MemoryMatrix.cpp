@@ -100,11 +100,14 @@ void MemoryMatrix::update (const mse::MemoryView& v)
 
     // The address image has at most one row per pixel; each image row shows
     // the trace at that height.
+    // With sequence context each row is [n-1 | n]: the context half first.
     const int rowsShown = displayRows();
     const int imageRows = juce::jlimit (1, rowsShown, juce::jmax (1, getHeight()));
-    if (! heat.isValid() || heat.getHeight() != imageRows)
+    const int cols = v.sequence ? 2 * mse::kFeatureSize : mse::kFeatureSize;
+    sequence = v.sequence;
+    if (! heat.isValid() || heat.getHeight() != imageRows || heat.getWidth() != cols)
     {
-        heat = juce::Image (juce::Image::ARGB, mse::kFeatureSize, imageRows, true);
+        heat = juce::Image (juce::Image::ARGB, cols, imageRows, true);
         heatKeys.clear();
     }
     heatKeys.resize (static_cast<size_t> (imageRows), ~uint64_t { 0 } - 1);
@@ -121,8 +124,15 @@ void MemoryMatrix::update (const mse::MemoryView& v)
             auto* line = reinterpret_cast<juce::PixelARGB*> (bits.getLinePointer (y));
             if (row >= count)
             {
-                std::fill (line, line + mse::kFeatureSize, empty);
+                std::fill (line, line + cols, empty);
                 continue;
+            }
+            if (sequence)
+            {
+                const int8_t* c = v.contextThumb (row);
+                for (int j = 0; j < mse::kFeatureSize; ++j)
+                    line[j] = theme::heatQ (c[j]);
+                line += mse::kFeatureSize;
             }
             const int8_t* t = v.thumb (row);
             for (int j = 0; j < mse::kFeatureSize; ++j)
@@ -144,12 +154,19 @@ void MemoryMatrix::paint (juce::Graphics& g)
         g.drawImage (heat, heatRect, juce::RectanglePlacement::stretchToFit);
     }
     // Slot separators.
-    const float slotW = heatRect.getWidth() / mse::kSlots;
+    const int slots = sequence ? 2 * mse::kSlots : mse::kSlots;
+    const float slotW = heatRect.getWidth() / static_cast<float> (slots);
     if (slotW >= 10.0f)
     {
         g.setColour (theme::background.withAlpha (0.55f));
-        for (int s = 1; s < mse::kSlots; ++s)
+        for (int s = 1; s < slots; ++s)
             g.fillRect (heatRect.getX() + s * slotW - 0.5f, heatRect.getY(), 1.0f, heatRect.getHeight());
+    }
+    if (sequence)
+    {
+        // Divider between the n-1 and n halves.
+        g.setColour (theme::background);
+        g.fillRect (heatRect.getCentreX() - 1.5f, heatRect.getY(), 3.0f, heatRect.getHeight());
     }
 
     const float lockX = 0.0f;
@@ -328,7 +345,11 @@ MemorySidePanel::MemorySidePanel()
 void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
 {
     heard = v.heard;
+    heardBefore = v.heardBefore;
     hasEcho = v.echoContent (echo);
+    v.echoContextContent (echoContext);
+    sequence = v.sequence;
+    predicting = v.chain || v.contextCue == static_cast<int> (mse::ContextCue::PredictNext);
     intensity = v.intensity;
     maxActivation = v.maxActivation;
     intensityShown += (juce::jlimit (0.0f, 1.0f, maxActivation) - intensityShown) * 0.35f;
@@ -340,6 +361,7 @@ void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
             hasSelection = true;
             sel = v.rows[static_cast<size_t> (i)];
             std::copy (v.thumb (i), v.thumb (i) + mse::kFeatureSize, selThumb.begin());
+            std::copy (v.contextThumb (i), v.contextThumb (i) + mse::kFeatureSize, selContextThumb.begin());
             break;
         }
     lockButton.setVisible (hasSelection);
@@ -351,7 +373,7 @@ void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
 void MemorySidePanel::resized()
 {
     auto r = getLocalBounds().reduced (8, 6);
-    auto top = r.removeFromTop (juce::jmin (84, r.getHeight() / 3));
+    auto top = r.removeFromTop (juce::jmin (116, r.getHeight() / 3));
     heardArea = top.removeFromLeft (top.getWidth() / 2).reduced (0, 0).withTrimmedRight (4);
     echoArea = top.withTrimmedLeft (4);
     r.removeFromTop (6);
@@ -374,11 +396,35 @@ void MemorySidePanel::paint (juce::Graphics& g)
         g.drawText (text, area.removeFromTop (14), juce::Justification::centredLeft);
         return area;
     };
-    const auto heardImg = caption (heardArea, "HEARD");
-    const auto echoImg = caption (echoArea, "ECHO");
-    drawAddress (g, heardImg.toFloat(), heard.data());
+    // Two halves side by side, [n-1 | n].
+    auto drawPair = [&] (juce::Rectangle<int> area, const float* before, const float* now) {
+        auto left = area.removeFromLeft (area.getWidth() / 2);
+        drawAddress (g, left.withTrimmedRight (2).toFloat(), before);
+        drawAddress (g, area.withTrimmedLeft (2).toFloat(), now);
+    };
+    juce::Rectangle<int> heardImg, echoImg;
+    if (sequence)
+    {
+        // Stacked, full width: [n-1 | n] for what was heard, and for the echo.
+        auto both = heardArea.getUnion (echoArea);
+        auto top = both.removeFromTop (both.getHeight() / 2);
+        heardImg = caption (top.withTrimmedBottom (3), "HEARD   n-1 | n");
+        echoImg = caption (both, predicting ? "ECHO   context | expected next" : "ECHO   n-1 | n");
+        drawPair (heardImg, heardBefore.data(), heard.data());
+    }
+    else
+    {
+        heardImg = caption (heardArea, "HEARD");
+        echoImg = caption (echoArea, "ECHO");
+        drawAddress (g, heardImg.toFloat(), heard.data());
+    }
     if (hasEcho)
-        drawAddress (g, echoImg.toFloat(), echo.data());
+    {
+        if (sequence)
+            drawPair (echoImg, echoContext.data(), echo.data());
+        else
+            drawAddress (g, echoImg.toFloat(), echo.data());
+    }
     else
     {
         g.setColour (theme::background);
@@ -418,7 +464,17 @@ void MemorySidePanel::paint (juce::Graphics& g)
     g.drawText ("TRACE #" + juce::String (static_cast<juce::int64> (sel.serial)) + (sel.clamped ? "  CLAMPED" : ""),
                 s.removeFromTop (14), juce::Justification::centredLeft);
     const int imgH = juce::jmin (64, s.getHeight() / 2);
-    drawAddress (g, s.removeFromTop (imgH).toFloat(), selThumb.data());
+    if (sequence)
+    {
+        auto img = s.removeFromTop (imgH);
+        auto left = img.removeFromLeft (img.getWidth() / 2);
+        drawAddress (g, left.withTrimmedRight (2).toFloat(), selContextThumb.data());
+        drawAddress (g, img.withTrimmedLeft (2).toFloat(), selThumb.data());
+    }
+    else
+    {
+        drawAddress (g, s.removeFromTop (imgH).toFloat(), selThumb.data());
+    }
     s.removeFromTop (4);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (12.0f));

@@ -1,0 +1,9 @@
+# Echo Chain steered by the input (Chain Input 0.5): memory follows its learned
+# sequence, pulled toward what is played now (echo only).
+sequence_context = on
+capacity = 100
+power = 9
+dry_level_db = -60
+@8 freeze = on
+@8 cue_source = Echo Chain
+@8 chain_input = 0.5

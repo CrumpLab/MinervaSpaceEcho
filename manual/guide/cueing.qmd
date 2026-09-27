@@ -33,6 +33,7 @@ current position, so you hear what came *next* last time.
 | **Sidechain** | Another track. In Live, set the plug-in's **Sidechain** input to that track. Memory still records the main input. |
 | **Random** | A random address each segment: memory dreams. |
 | **Frozen** | The last live cue, held. Combine with Freeze Memory for a stable loop of recollection. |
+| **Echo Chain** | The previous echo: each echo cues the next. See [Sequences](sequences.qmd). |
 
 ## Shaping the match
 
@@ -41,5 +42,6 @@ current position, so you hear what came *next* last time.
 - **Recency** favours recently stored traces.
 - **Self Match** decides whether the segment just played may answer itself.
 - **Cue Gate** stops quiet segments from cueing memory at all, so the noise floor doesn't trigger echoes.
+- **Sequence Context** adds the previous segment to the match; see [Sequences](sequences.qmd).
 - **Activation Power**, **Similarity**, **Negative Activations** and **Echo Normalization** are covered in
   [How MINERVA works](../concepts/minerva.qmd).

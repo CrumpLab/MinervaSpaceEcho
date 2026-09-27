@@ -23,7 +23,27 @@ struct RetrievalSettings
     int excludeSlot = -1;   // slot to ignore (self-match off), or -1
     FeatureFocus focus = FeatureFocus::Full;
     float recency = 0.0f;   // 0..1: activation *= exp(-recency * age / 4), age in traces stored since
+
+    // Sequential context (Stage 9). A trace's address is [context | features]
+    // ([n-1 | n]). When contextWeight > 0, `contextProbe` is compared with
+    // each trace's context half, the probe with its features, and the
+    // similarity is the weighted mean of the two:
+    //   S = (contextWeight * S_context + currentWeight * S_current) / (contextWeight + currentWeight)
+    // With contextWeight = 0 (the default) retrieval is exactly MINERVA II.
+    const FeatureVector* contextProbe = nullptr;
+    float contextWeight = 0.0f;
+    float currentWeight = 1.0f;
 };
+
+// Combines the two halves' similarities as above.
+inline float combineHalves (float sContext, float wContext, float sCurrent, float wCurrent) noexcept
+{
+    if (wContext <= 0.0f)
+        return sCurrent;
+    if (wCurrent <= 0.0f)
+        return sContext;
+    return (wContext * sContext + wCurrent * sCurrent) / (wContext + wCurrent);
+}
 
 // Feature focus (plan §4): compare only rhythm (loudness over time: each
 // slot's mean over bands, kept in band 0) or only timbre (each band's mean
@@ -99,7 +119,7 @@ OffsetMatch bestOffset (const WindowProbe& probe, const TraceSlot& trace, int mi
 // of the retrieved traces' features, re-normalised (or re-ternarised). Used to
 // cue iterative heads with the previous echo.
 void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
-                   float ternaryThreshold, FeatureVector& out) noexcept;
+                   float ternaryThreshold, FeatureVector& out, bool contextHalf = false) noexcept;
 
 struct BestMatch
 {

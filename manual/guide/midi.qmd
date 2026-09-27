@@ -20,6 +20,7 @@ trigger actions. **MIDI Channel** restricts them to one channel (0 = any).
 | F1 | +5 | Unclamp All |
 | F#1 | +6 | Clear Unclamped |
 | G1 | +7 | Clear All |
+| G#1 | +8 | Echo Chain, while the note is held ([Sequences](sequences.qmd)) |
 | C2 | +12 | Mode Selector: Custom |
 | C#2 – G#2 | +13 – +20 | Mode Selector: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative 1+2+3 |
 

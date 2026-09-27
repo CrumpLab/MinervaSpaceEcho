@@ -1,0 +1,11 @@
+# Echo Chain, free-running: from bar 8 each echo's expected next bar cues the
+# next echo, and the input is ignored. Memory replays style A as a sequence of
+# its own while style B plays in (echo only).
+sequence_context = on
+context_cue = Predict Next
+capacity = 100
+power = 9
+dry_level_db = -60
+@8 freeze = on
+@8 cue_source = Echo Chain
+@8 chain_input = 0

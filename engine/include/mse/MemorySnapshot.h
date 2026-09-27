@@ -25,6 +25,7 @@ struct TraceRecord
     int mergeCount = 1;
     bool clamped = false;
     FeatureVector features {};
+    FeatureVector context {};                // previous segment's address (all 0 = none)
 
     int64_t length() const { return audio.empty() ? 0 : static_cast<int64_t> (audio[0].size()); }
 };

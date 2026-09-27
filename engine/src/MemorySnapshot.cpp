@@ -2,6 +2,8 @@
 
 #include "mse/Wav.h"
 
+#include <algorithm>
+
 #include <nlohmann/json.hpp>
 
 #include <cmath>
@@ -28,7 +30,7 @@ std::string traceFileName (size_t index)
 
 json traceMeta (const TraceRecord& t)
 {
-    return json {
+    json j {
         { "begin", t.begin },
         { "nominal_length", t.nominalLength },
         { "length", t.length() },
@@ -41,6 +43,10 @@ json traceMeta (const TraceRecord& t)
         { "clamped", t.clamped },
         { "features", std::vector<float> (t.features.begin(), t.features.end()) },
     };
+    // Sequential context (optional; older files have none).
+    if (std::any_of (t.context.begin(), t.context.end(), [] (float v) { return v != 0.0f; }))
+        j["context"] = std::vector<float> (t.context.begin(), t.context.end());
+    return j;
 }
 
 void readTraceMeta (const json& j, TraceRecord& t)
@@ -58,6 +64,14 @@ void readTraceMeta (const json& j, TraceRecord& t)
     if (f.size() != t.features.size())
         throw std::runtime_error ("trace features have the wrong size");
     std::copy (f.begin(), f.end(), t.features.begin());
+    t.context.fill (0.0f);
+    if (j.contains ("context"))
+    {
+        const auto c = j.at ("context").get<std::vector<float>>();
+        if (c.size() != t.context.size())
+            throw std::runtime_error ("trace context has the wrong size");
+        std::copy (c.begin(), c.end(), t.context.begin());
+    }
 }
 
 json manifest (const MemorySnapshot& s, bool withFiles)

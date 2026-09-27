@@ -190,7 +190,7 @@ void MinervaSpaceEchoProcessor::handleMidi (const juce::MidiBuffer& midi, const 
             continue;
         if (m.isAllNotesOff() || m.isAllSoundOff())
         {
-            midiFreeze = midiSpectralFreeze = false;
+            midiFreeze = midiSpectralFreeze = midiChain = false;
             continue;
         }
         const bool on = m.isNoteOn();
@@ -206,6 +206,7 @@ void MinervaSpaceEchoProcessor::handleMidi (const juce::MidiBuffer& midi, const 
         {
             case mse::MidiAction::Freeze:         midiFreeze = on; break;
             case mse::MidiAction::SpectralFreeze: midiSpectralFreeze = on; break;
+            case mse::MidiAction::EchoChain:      midiChain = on; break;
             case mse::MidiAction::None:           break;
             case mse::MidiAction::ModeSelector:
                 if (on)
@@ -288,8 +289,10 @@ void MinervaSpaceEchoProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     if (params.midiControl)
         handleMidi (midi, params);
     else
-        midiFreeze = midiSpectralFreeze = false;
+        midiFreeze = midiSpectralFreeze = midiChain = false;
     params.freeze = params.freeze || midiFreeze;
+    if (midiChain)
+        params.cueSource = mse::CueSource::EchoChain;
     params.spectralFreeze = params.spectralFreeze || midiSpectralFreeze;
     if (modeOverride >= 0)
     {

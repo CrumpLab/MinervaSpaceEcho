@@ -88,6 +88,14 @@ Failure** zeroes each stored feature with that probability (the cue you heard st
 poorly encoded traces is vaguer. Over time, **Forgetting / Segment** keeps knocking features out and
 **Fading / Segment** reduces strength until a trace drops out of memory altogether.
 
+## Sequences
+
+Jamieson and Mewhort (2009) extended MINERVA to sequence learning by storing each event together with the event
+before it, [n−1 | n], much like the context units of an Elman network. Cue with the event just seen against the
+traces' n−1 halves, and the echo's other half is an expectation of what comes next. MINERVA Space Echo can do the
+same with segments of audio, and can let each echo's expectation cue the next echo; see
+[Sequences](../guide/sequences.qmd).
+
 ## The pipeline
 
 ```{mermaid}
@@ -106,9 +114,12 @@ flowchart TD
 
 ## Further reading
 
+- Elman, J. L. (1990). Finding structure in time. *Cognitive Science, 14*(2), 179–211.
 - Hintzman, D. L. (1984). MINERVA 2: A simulation model of human memory. *Behavior Research Methods,
   Instruments, & Computers, 16*, 96–101.
 - Hintzman, D. L. (1986). "Schema abstraction" in a multiple-trace memory model. *Psychological Review, 93*,
   411–428.
 - Hintzman, D. L. (1988). Judgments of frequency and recognition memory in a multiple-trace memory model.
   *Psychological Review, 95*, 528–551.
+- Jamieson, R. K., & Mewhort, D. J. K. (2009). Applying an exemplar model to the serial reaction-time task:
+  Anticipating from experience. *Quarterly Journal of Experimental Psychology, 62*(9), 1757–1783.

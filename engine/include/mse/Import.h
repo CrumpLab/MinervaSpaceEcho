@@ -20,7 +20,8 @@ struct ImportSettings
 };
 
 // `audio` is [channel][sample] at `sampleRate`; the result is at `targetSampleRate`.
-// Silent pieces are skipped.
+// Silent pieces are skipped. Each trace's context (Stage 9) is the address of
+// the piece before it in the same file.
 MemorySnapshot tracesFromAudio (const std::vector<std::vector<float>>& audio, double sampleRate,
                                 double targetSampleRate, const ImportSettings& settings);
 

@@ -15,7 +15,8 @@ const char* const kWriteModeChoices[] = { "Auto", "Manual" };
 const char* const kNoveltyChoices[] = { "Off", "Store Novel", "Store Familiar" };
 const char* const kSourceChoices[] = { "Input", "Echo", "Input + Echo" };
 const char* const kCueModeChoices[] = { "Segment", "Progressive", "Rolling" };
-const char* const kCueSourceChoices[] = { "Input", "Sidechain", "Random", "Frozen" };
+const char* const kCueSourceChoices[] = { "Input", "Sidechain", "Random", "Frozen", "Echo Chain" };
+const char* const kContextCueChoices[] = { "Match Both", "Predict Next", "Current Only" };
 const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
 const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
 const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
@@ -78,9 +79,14 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "rolling_interval_ms","Rolling Interval",      ParamType::Float,  20,   1000,   100,   150,  "ms",     NOCHOICE,                      true },
     { "lookahead_ms",       "Prediction",            ParamType::Float,  0,    2000,   0,     250,  "ms",     NOCHOICE,                      true },
     { "cue_smoothing_ms",   "Cue Smoothing",         ParamType::Float,  1,    500,    40,    60,   "ms",     NOCHOICE,                      true },
-    { "cue_source",         "Cue Source",            ParamType::Choice, 0,    3,      0,     0,    "",       CHOICE (kCueSourceChoices),    true },
+    { "cue_source",         "Cue Source",            ParamType::Choice, 0,    4,      0,     0,    "",       CHOICE (kCueSourceChoices),    true },
     { "feature_focus",      "Feature Focus",         ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kFocusChoices),        true },
     { "recency",            "Recency",               ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    // sequential context
+    { "sequence_context",   "Sequence Context",      ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
+    { "context_cue",        "Context Cue",           ParamType::Choice, 0,    2,      1,     0,    "",       CHOICE (kContextCueChoices),   true },
+    { "context_weight",     "Context Weight",        ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
+    { "chain_input",        "Chain Input",           ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     // heads
     { "mode_selector",      "Mode Selector",         ParamType::Choice, 0,    8,      0,     0,    "",       CHOICE (kSelectorChoices),     true },
     { "head1_level_db",     "Head 1 Level",          ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
@@ -228,6 +234,10 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.cueSource = static_cast<CueSource> (idx (kCueSource));
     p.featureFocus = static_cast<FeatureFocus> (idx (kFeatureFocus));
     p.recency = v (kRecency);
+    p.sequenceContext = on (kSequenceContext);
+    p.contextCue = static_cast<ContextCue> (idx (kContextCue));
+    p.contextWeight = v (kContextWeight);
+    p.chainInput = v (kChainInput);
 
     p.modeSelector = static_cast<ModeSelector> (idx (kModeSelector));
     p.headLevelDb[0] = v (kHead1LevelDb);

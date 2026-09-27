@@ -50,6 +50,7 @@ private:
     std::vector<uint64_t> heatKeys;
     uint64_t selected = 0;
     int hoverRow = -1;
+    bool sequence = false; // rows show [n-1 | n]
 };
 
 // Beside the matrix: what cued memory, what came back, how familiar it was,
@@ -68,12 +69,12 @@ public:
     void resized() override;
 
 private:
-    mse::FeatureVector heard {}, echo {};
-    bool hasEcho = false;
+    mse::FeatureVector heard {}, echo {}, heardBefore {}, echoContext {};
+    bool hasEcho = false, sequence = false, predicting = false;
     float intensity = 0.0f, maxActivation = 0.0f, intensityShown = 0.0f;
     bool hasSelection = false;
     mse::TraceView sel;
-    std::array<int8_t, mse::kFeatureSize> selThumb {};
+    std::array<int8_t, mse::kFeatureSize> selThumb {}, selContextThumb {};
     juce::TextButton lockButton { "Clamp" }, deleteButton { "Delete" };
     juce::Rectangle<int> heardArea, echoArea, meterArea, selArea;
 };

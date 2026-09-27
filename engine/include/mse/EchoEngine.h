@@ -167,15 +167,19 @@ private:
                        const float* const* sidechain, int sidechainChannels) noexcept; // numSamples <= maxBlockSize
     void resetPlayback() noexcept;
     void clearHeads() noexcept;
+    void resetContext() noexcept;
     void adoptPendingStore() noexcept;
     void processCommands() noexcept;
     void runCommand (Command c, uint64_t arg) noexcept; // inside a mutation
     double nominalLength (const HostClock& clock) const noexcept;
     int64_t recordLimit() const noexcept;
     void boundary (int64_t newBegin, double newNominal) noexcept;
-    WriteOutcome writeTrace (int spare, const FeatureExtractor& fx, const FeatureVector& feats, float rms,
-                             int64_t recorded, int generation, bool forced, int& outSlot) noexcept;
+    WriteOutcome writeTrace (int spare, const FeatureExtractor& fx, const FeatureVector& feats, const FeatureVector& context,
+                             float rms, int64_t recorded, int generation, bool forced, int& outSlot) noexcept;
     RetrievalSettings retrievalSettings() const noexcept;
+    // Sets rs's context fields for a cue `now` (previous cue `before`) and
+    // fills contextProbeCurrent / contextProbeContext.
+    void applyContextCue (RetrievalSettings& rs, const FeatureVector& now, const FeatureVector& before) noexcept;
     void noteUse (const RetrievalResult& result) noexcept;
     // Installs weights[0..n) on a head, shaped by the playback mode.
     void installEcho (int head, const EchoWeight* w, int n, float tracking, int64_t pos, int64_t fadeOutLen,
@@ -253,6 +257,15 @@ private:
     FeatureExtractor features, echoFeatures, scFeatures;
     FeatureVector probe {}, echoProbe {}, partialProbe {}, cue {}, frozenCue {};
     float frozenCueRms = 0.0f;
+
+    // sequential context (Stage 9)
+    FeatureVector prevHeard {};          // the last segment's address: the next trace's context
+    FeatureVector heardBefore {};        // the segment before that (for the view's [n-1 | n])
+    FeatureVector prevEchoHeard {};      // same for recorded echoes
+    FeatureVector prevCue {};            // the previous cue (Match Both's context probe)
+    FeatureVector contextProbeCurrent {}, contextProbeContext {};
+    FeatureVector chainState {};         // Echo Chain: the last echo's content
+    bool chainValid = false;
     bool sidechainActive = false;
     double cueSegEnergy = 0.0;               // energy of the cue signal (input or sidechain) this segment
     std::vector<float> scMonoBuf;

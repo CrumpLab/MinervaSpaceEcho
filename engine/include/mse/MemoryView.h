@@ -43,18 +43,19 @@ struct MemoryView
     static constexpr float kThumbScale = 40.0f;
     std::vector<int> rowSlot;            // per row: its memory slot
     std::vector<int8_t> thumbs;          // per slot: kFeatureSize values
+    std::vector<int8_t> contextThumbs;   // per slot: the context half (n-1), same layout
     std::vector<uint64_t> thumbKeys;     // per slot: which trace / feature version the thumb shows
 
     FeatureVector heard {};    // features of the last segment heard (what cued memory)
+    FeatureVector heardBefore {}; // the segment before it: [heardBefore | heard] is the last [n-1 | n]
 
-    const int8_t* thumb (int row) const noexcept
-    {
-        return thumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kFeatureSize;
-    }
-    // The echo's content (MINERVA's echo): the activation-weighted mean of
-    // the rows' addresses, re-normalised. False if nothing is active.
-    // Computed by the reader, off the audio thread.
-    bool echoContent (FeatureVector& out) const noexcept
+    // Sequential context (Stage 9)
+    bool sequence = false;     // Sequence Context on: show [n-1 | n]
+    int contextCue = 1;        // ContextCue index
+    bool chain = false;        // Cue Source = Echo Chain
+
+private:
+    bool blend (FeatureVector& out, bool contextHalf) const noexcept
     {
         out.fill (0.0f);
         double total = 0.0;
@@ -64,7 +65,7 @@ struct MemoryView
             if (! (a > 0.0f || a < 0.0f))
                 continue;
             total += a < 0.0f ? -a : a;
-            const int8_t* t = thumb (i);
+            const int8_t* t = contextHalf ? contextThumb (i) : thumb (i);
             for (int j = 0; j < kFeatureSize; ++j)
                 out[static_cast<size_t> (j)] += a * static_cast<float> (t[j]);
         }
@@ -80,6 +81,24 @@ struct MemoryView
         for (auto& v : out)
             v = sd > 0.0 ? static_cast<float> ((v - mean) / sd) : 0.0f;
         return true;
+    }
+
+public:
+    const int8_t* thumb (int row) const noexcept
+    {
+        return thumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kFeatureSize;
+    }
+    // The echo's content (MINERVA's echo): the activation-weighted mean of
+    // the rows' addresses, re-normalised. False if nothing is active.
+    // Computed by the reader, off the audio thread.
+    bool echoContent (FeatureVector& out) const noexcept { return blend (out, false); }
+
+    // The echo's context half: the weighted mean of the answering traces' n-1 halves.
+    bool echoContextContent (FeatureVector& out) const noexcept { return blend (out, true); }
+
+    const int8_t* contextThumb (int row) const noexcept
+    {
+        return contextThumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kFeatureSize;
     }
 
     // Changes whenever the row shows a different trace or its address changes.

@@ -71,6 +71,7 @@ private:
     uint32_t lastMidiCount = 0;
     int midiFlash = 0;
     int shownBaseNote = -1;
+    bool sequenceView = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MinervaSpaceEchoEditor)
 };

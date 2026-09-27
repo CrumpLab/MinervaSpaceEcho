@@ -121,10 +121,18 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
         const int slot = store.storedSlot (i);
         if (slot == settings.excludeSlot)
             continue;
-        const auto& f = store.slot (slot).features;
-        const float s = settings.focus == FeatureFocus::Full
-                            ? similarity (probe, f, settings.similarity)
-                            : focusedSimilarity (probe, f, settings.similarity, settings.focus, 0, kSlots, false);
+        const auto& t = store.slot (slot);
+        auto half = [&settings] (const FeatureVector& p, const FeatureVector& f) {
+            return settings.focus == FeatureFocus::Full
+                       ? similarity (p, f, settings.similarity)
+                       : focusedSimilarity (p, f, settings.similarity, settings.focus, 0, kSlots, false);
+        };
+        float s;
+        if (settings.contextProbe == nullptr || settings.contextWeight <= 0.0f)
+            s = half (probe, t.features);
+        else
+            s = combineHalves (half (*settings.contextProbe, t.context), settings.contextWeight,
+                               settings.currentWeight > 0.0f ? half (probe, t.features) : 0.0f, settings.currentWeight);
         out[n++] = { slot, s, 0.0f, 0 };
     }
     return finishRetrieval (store, settings, out, n);
@@ -231,13 +239,14 @@ float focusedSimilarity (const FeatureVector& probe, const FeatureVector& trace,
 }
 
 void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
-                   float ternaryThreshold, FeatureVector& out) noexcept
+                   float ternaryThreshold, FeatureVector& out, bool contextHalf) noexcept
 {
     std::array<double, kFeatureSize> acc {};
     double total = 0.0;
     for (int i = 0; i < n; ++i)
     {
-        const auto& f = store.slot (weights[i].slot).features;
+        const auto& t = store.slot (weights[i].slot);
+        const auto& f = contextHalf ? t.context : t.features;
         const double w = weights[i].weight;
         for (size_t j = 0; j < acc.size(); ++j)
             acc[j] += w * f[j];

@@ -598,7 +598,7 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
     (.pkg); CI signs and notarizes when Developer ID secrets are present
     (docs/RELEASING.md) and turns `v*` tags into GitHub releases.
 
-### Stage 9: Sequential context (Jamieson & Mewhort) — proposed, for review
+### Stage 9: Sequential context (Jamieson & Mewhort)
 
 **Idea.** Jamieson and Mewhort (2009) extended MINERVA to the serial
 reaction-time task by storing each event together with the event before it,
@@ -709,6 +709,25 @@ probe<sub>k+1</sub> = [ (1 − *w*) · echo<sub>k</sub>(n half) + *w* · *h*<sub
 - Factory presets: **Anticipate**, **Sequence Memory**, **Dreaming Sequencer**.
 - Manual: a "Sequences" section in *How MINERVA works* (J&M and Elman), a
   user-guide page, parameter reference (generated), listening examples.
+
+- **Status:** implemented (version 0.2.0); awaiting a listen in Live.
+  - Context is stored as a second 384-value vector per trace. The two
+    halves' similarities are combined as a weighted mean, so Current Only (and
+    Sequence Context off) is exactly the old retrieval; every earlier test
+    passes unchanged.
+  - Context is recorded always (not only when Sequence Context is on), so it
+    can be switched on for an existing memory. Saved as an optional
+    `context` field, so no format version change was needed.
+  - Novelty and consolidation compare the current halves only; merging
+    averages both halves.
+  - MIDI base note + 8 *holds* the chain (on while the note is down), rather
+    than toggling it.
+  - Tests: context is stored and saved; Predict Next anticipates (echo
+    correlates > 0.8 with the next segment); Match Both separates B-after-A
+    from B-after-D (activations 0.999 vs 0.043); a free-running chain seeded
+    with A plays B C D A B C D (correlations 0.95–0.98); Chain Input 1
+    equals Predict Next; Sequence Context off ignores the context cue;
+    imports get context. Context adds ~15 % CPU.
 
 References: Jamieson, R. K., & Mewhort, D. J. K. (2009). Applying an exemplar
 model to the serial reaction-time task: Anticipating from experience.

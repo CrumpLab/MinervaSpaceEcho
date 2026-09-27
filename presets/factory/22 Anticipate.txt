@@ -1,0 +1,7 @@
+# Sequence context, Predict Next: each bar recalls what followed bars like it
+# before, so you hear memory's expectation of the next bar as you play it.
+sequence_context = on
+context_cue = Predict Next
+capacity = 100
+power = 6
+echo_level_db = -6

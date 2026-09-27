@@ -39,6 +39,7 @@ MemorySnapshot tracesFromAudio (const std::vector<std::vector<float>>& audio, do
     FeatureExtractor fx;
     std::vector<float> mono;
     std::vector<TraceRecord> kept;
+    FeatureVector previous {}; // sequential context: the previous piece of the file (Stage 9)
     for (auto& t : snap.traces)
     {
         const auto n = static_cast<size_t> (t.length());
@@ -53,7 +54,10 @@ MemorySnapshot tracesFromAudio (const std::vector<std::vector<float>>& audio, do
         fx.prepare (snap.sampleRate);
         fx.beginSegment (t.nominalLength);
         fx.push (mono.data(), static_cast<int> (n), 0);
-        if (! fx.finalize (t.features, settings.features))
+        const bool heard = fx.finalize (t.features, settings.features);
+        t.context = previous;
+        previous = t.features; // all 0 if this piece was silent
+        if (! heard)
             continue; // silent
         t.rms = n > 0 ? static_cast<float> (std::sqrt (energy / static_cast<double> (n))) : 0.0f;
         t.serial = kept.size() + 1;

@@ -20,10 +20,11 @@ enum class RecordSource { Input, Echo, InputAndEcho };
 enum class CueMode { Segment, Progressive, Rolling };
 enum class HeadMode { Off, Delay, Iterative };
 enum class Playback { Blend, Voices, Sample };
-enum class CueSource { Input, Sidechain, Random, Frozen };
+enum class CueSource { Input, Sidechain, Random, Frozen, EchoChain };
 enum class FeatureFocus { Full, Rhythm, Timbre };
 enum class LengthMismatch { Varispeed, Cut, Loop, Stretch };
 enum class BlendDomain { Waveform, Spectral };
+enum class ContextCue { MatchBoth, PredictNext, CurrentOnly };
 
 // RE-201-style head combinations. Custom uses the per-head settings.
 enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
@@ -85,6 +86,13 @@ struct EngineParams
     CueSource cueSource = CueSource::Input;
     FeatureFocus featureFocus = FeatureFocus::Full;
     float recency = 0.0f;                              // favour recently stored traces
+
+    // sequential context (Stage 9; Jamieson & Mewhort 2009): every trace also
+    // stores the previous segment's address, [n-1 | n]
+    bool sequenceContext = false;                      // cue with the context half too
+    ContextCue contextCue = ContextCue::PredictNext;
+    float contextWeight = 1.0f;                        // Match Both: weight of the n-1 half
+    float chainInput = 0.0f;                           // Echo Chain: how much the live input steers the chain
 
     // heads (plan §4.3)
     ModeSelector modeSelector = ModeSelector::Custom;
@@ -168,6 +176,7 @@ enum ParamIndex
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
     kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
     kCueSource, kFeatureFocus, kRecency,
+    kSequenceContext, kContextCue, kContextWeight, kChainInput,
     kModeSelector, kHead1LevelDb, kHead1Pan, kHead2Mode, kHead2LevelDb, kHead2Pan, kHead3Mode, kHead3LevelDb, kHead3Pan,
     kPlayback, kVoices, kVoiceSpread, kVoiceDetune, kVoiceDelayMs,
     kEchoToneHz, kIntensityToTone, kIntensityToFeedback,

@@ -241,6 +241,7 @@ std::unique_ptr<TraceStore> EchoEngine::buildStoreFrom (const MemorySnapshot& so
         meta.mergeCount = t.mergeCount;
         meta.clamped = t.clamped;
         meta.features = t.features;
+        meta.context = t.context;
 
         // Audio laid out from segment position 0 (silence before `begin`);
         // stereo memory loaded into a mono store is mixed down.
@@ -369,6 +370,7 @@ void EchoEngine::enableMemoryView()
         b->rows.resize (kMaxCapacity);
         b->rowSlot.assign (kMaxCapacity, 0);
         b->thumbs.assign (slots * kFeatureSize, 0);
+        b->contextThumbs.assign (slots * kFeatureSize, 0);
         b->thumbKeys.assign (slots, ~uint64_t { 0 });
     }
     viewActivation.assign (kMaxCapacity + TraceStore::kSpares, 0.0f);
@@ -413,6 +415,7 @@ MemorySnapshot EchoEngine::snapshotOf (const TraceStore& store_)
         t.mergeCount = s.mergeCount;
         t.clamped = s.clamped;
         t.features = s.features;
+        t.context = s.context;
         snap.traces.push_back (std::move (t));
     }
     return snap;
@@ -498,6 +501,15 @@ EngineStats EchoEngine::getStats() const noexcept
 
 // ==== audio thread ===================================================================
 
+void EchoEngine::resetContext() noexcept
+{
+    prevHeard.fill (0.0f);
+    heardBefore.fill (0.0f);
+    prevEchoHeard.fill (0.0f);
+    prevCue.fill (0.0f);
+    chainValid = false;
+}
+
 void EchoEngine::clearHeads() noexcept
 {
     for (int h = 0; h < kNumHeads; ++h)
@@ -527,6 +539,7 @@ void EchoEngine::resetPlayback() noexcept
     recordEchoOnly = recordEchoToo = false;
     captureArmed = false;
     rolling.active = false;
+    resetContext();
     lastSearchStart = -(int64_t { 1 } << 40);
     nextSlot = 1;
     dryGain = levelToGain (params.dryLevelDb);
@@ -711,6 +724,7 @@ void EchoEngine::runCommand (Command c, uint64_t arg) noexcept
             rolling.active = false;
             store->clear();
             clearHeads();
+            resetContext();
             segmentCount = evictionCount = mergeCount = rejectionCount = 0;
             writeIdx = segBegin = 0; // drop the half-recorded segment too
             segEnergy = echoSegEnergy = 0.0;
@@ -848,6 +862,7 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
             }
             boundary (begin, nominal);
             boundaryPending = false;
+            resetContext(); // after a jump the next segment doesn't follow the last one
         }
         firstBoundary = toBoundary <= 0 ? 0 : toBoundary;
         if (boundaryPending)
@@ -1085,7 +1100,10 @@ void EchoEngine::mergeInto (TraceSlot& dst, TraceSlot& src) noexcept
     dst.begin = b;
     dst.end = std::max (b, e);
     for (size_t j = 0; j < dst.features.size(); ++j)
+    {
         dst.features[j] = dst.features[j] * (1.0f - w) + src.features[j] * w;
+        dst.context[j] = dst.context[j] * (1.0f - w) + src.context[j] * w;
+    }
     ++dst.featureVersion;
 
     // Frame tracks (dB levels) merge the same way over their union.
@@ -1161,6 +1179,9 @@ void EchoEngine::applyDecay() noexcept
             for (auto& f : s.features)
                 if (f != 0.0f && random01() < params.decayForget)
                     f = 0.0f;
+            for (auto& f : s.context)
+                if (f != 0.0f && random01() < params.decayForget)
+                    f = 0.0f;
             ++s.featureVersion;
         }
         if (s.strength < kDeadStrength)
@@ -1168,8 +1189,9 @@ void EchoEngine::applyDecay() noexcept
     }
 }
 
-WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, const FeatureVector& feats, float rms,
-                                     int64_t recorded, int generation, bool forced, int& outSlot) noexcept
+WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, const FeatureVector& feats,
+                                     const FeatureVector& context, float rms, int64_t recorded, int generation, bool forced,
+                                     int& outSlot) noexcept
 {
     outSlot = -1;
     if (params.freeze && ! forced)
@@ -1208,10 +1230,16 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, c
     // Encoding failure: the stored copy loses features; the cue (what was
     // actually heard) stays intact.
     spare.features = feats;
+    spare.context = context; // the previous segment's address (Stage 9)
     if (params.encodingFailure > 0.0f)
+    {
         for (auto& f : spare.features)
             if (random01() < params.encodingFailure)
                 f = 0.0f;
+        for (auto& f : spare.context)
+            if (f != 0.0f && random01() < params.encodingFailure)
+                f = 0.0f;
+    }
     if (params.contentDropout > 0.0f)
         applyDropouts (spare);
 
@@ -1279,7 +1307,7 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
                 applyDecay(); // one segment of time has passed
 
             const bool forced = captureArmed;
-            outcome = writeTrace (TraceStore::kInputSpare, features, probe, cueRms, recorded,
+            outcome = writeTrace (TraceStore::kInputSpare, features, probe, prevHeard, cueRms, recorded,
                                   recordEchoOnly ? segEchoGeneration : 0, forced, selfSlot);
             if (forced && outcome != WriteOutcome::None)
                 captureArmed = false;
@@ -1289,8 +1317,8 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
                 echoFeatures.finalize (echoProbe, fs);
                 const float echoRms = static_cast<float> (std::sqrt (echoSegEnergy / static_cast<double> (recorded)));
                 int echoSlot = -1;
-                writeTrace (TraceStore::kEchoSpare, echoFeatures, echoProbe, echoRms, recorded, segEchoGeneration,
-                            false, echoSlot);
+                writeTrace (TraceStore::kEchoSpare, echoFeatures, echoProbe, prevEchoHeard, echoRms, recorded,
+                            segEchoGeneration, false, echoSlot);
             }
         }
         lastWrite = outcome;
@@ -1303,16 +1331,43 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
             // though its level-independent features could still match loud memories.
             float liveCueRms = cueRms;
             const bool live = makeCue (cue, liveCueRms, recorded);
-            const bool gated = live && params.cueGateDb > kCueGateOffDb && toDb (liveCueRms) < params.cueGateDb;
+            bool gated = live && params.cueGateDb > kCueGateOffDb && toDb (liveCueRms) < params.cueGateDb;
             auto rs = retrievalSettings();
             rs.excludeSlot = params.selfMatch ? -1 : selfSlot;
-            const auto result = gated ? RetrievalResult {} : retrieve (cue, *store, rs, weights.data());
+
+            // Echo Chain (Stage 9): the last echo's content cues memory, blended
+            // with the live input by Chain Input; without an echo it restarts
+            // from the input.
+            const bool chaining = params.cueSource == CueSource::EchoChain && chainValid;
+            if (chaining)
+            {
+                const float w = std::clamp (params.chainInput, 0.0f, 1.0f);
+                for (size_t j = 0; j < cue.size(); ++j)
+                    cue[j] = (1.0f - w) * chainState[j] + (gated ? 0.0f : w * cue[j]);
+                gated = false;
+                if (w <= 0.0f)
+                    liveCueRms = -1.0f; // no level to track: the chain runs on its own
+            }
+            applyContextCue (rs, cue, prevCue);
+            prevCue = cue;
+            const auto result = gated ? RetrievalResult {} : retrieve (contextProbeCurrent, *store, rs, weights.data());
             if (! held)
                 noteUse (result);
             installNominal = newNominal;
             installMain (result, liveCueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
             updateOtherHeads (mainTracking, newBegin);
+
+            // The chain's next step: what memory expects next.
+            chainValid = params.cueSource == CueSource::EchoChain && headWeightCount[0] > 0;
+            if (chainValid)
+                echoAddress (headWeights[0].data(), headWeightCount[0], *store, params.featureMode,
+                             params.ternaryThreshold, chainState);
         }
+        // Context for the next segment's trace, and what the view shows as [n-1 | n].
+        heardBefore = prevHeard;
+        prevHeard = probe;
+        if (recordEchoToo)
+            prevEchoHeard = echoProbe;
         if (! held)
             endMutation();
     }
@@ -1343,6 +1398,38 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
     recordEchoToo = params.recordSource == RecordSource::InputAndEcho && current.count > 0;
 
     publishStats();
+}
+
+void EchoEngine::applyContextCue (RetrievalSettings& rs, const FeatureVector& now, const FeatureVector& before) noexcept
+{
+    // Sequential context (Stage 9): which halves of the traces' [n-1 | n]
+    // addresses the cue is compared with.
+    contextProbeCurrent = now;
+    rs.contextProbe = nullptr;
+    rs.contextWeight = 0.0f;
+    rs.currentWeight = 1.0f;
+    const bool chain = params.cueSource == CueSource::EchoChain;
+    if (! params.sequenceContext)
+        return; // MINERVA II: the current half only (a chain then free-associates)
+    const ContextCue mode = chain ? ContextCue::PredictNext : params.contextCue;
+    switch (mode)
+    {
+        case ContextCue::MatchBoth:
+            // [previous cue | cue] against [n-1 | n]: recall that depends on what came before.
+            contextProbeContext = before;
+            rs.contextProbe = &contextProbeContext;
+            rs.contextWeight = std::clamp (params.contextWeight, 0.0f, 1.0f);
+            break;
+        case ContextCue::PredictNext:
+            // [cue | blank]: traces whose n-1 matches the cue; their audio is what came next.
+            contextProbeContext = now;
+            rs.contextProbe = &contextProbeContext;
+            rs.contextWeight = 1.0f;
+            rs.currentWeight = 0.0f;
+            break;
+        case ContextCue::CurrentOnly:
+            break;
+    }
 }
 
 RetrievalSettings EchoEngine::retrievalSettings() const noexcept
@@ -1595,7 +1682,15 @@ void EchoEngine::updateOtherHeads (float tracking, int64_t pos) noexcept
             const int from = headWeightCount[static_cast<size_t> (h - 1)] > 0 ? h - 1 : 0;
             echoAddress (headWeights[static_cast<size_t> (from)].data(), headWeightCount[static_cast<size_t> (from)],
                          *store, params.featureMode, params.ternaryThreshold, iterCue);
-            n = retrieve (iterCue, *store, retrievalSettings(), out.data()).numWeights;
+            // With sequence context the same rule applies: Predict Next plays
+            // what follows the previous head's echo, and so on down the heads.
+            FeatureVector iterBefore {};
+            if (params.sequenceContext && params.contextCue == ContextCue::MatchBoth)
+                echoAddress (headWeights[static_cast<size_t> (from)].data(), headWeightCount[static_cast<size_t> (from)],
+                             *store, params.featureMode, params.ternaryThreshold, iterBefore, true);
+            auto rs = retrievalSettings();
+            applyContextCue (rs, iterCue, iterBefore);
+            n = retrieve (contextProbeCurrent, *store, rs, out.data()).numWeights;
         }
         headWeightCount[static_cast<size_t> (h)] = n;
 
@@ -1636,6 +1731,7 @@ bool EchoEngine::makeCue (FeatureVector& out, float& cueRms, int64_t recorded) n
             return false;
         case CueSource::Sidechain:
         case CueSource::Input:
+        case CueSource::EchoChain: // the live input seeds and steers the chain
             break;
     }
     if (sidechainActive)
@@ -1660,8 +1756,9 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     const int64_t recorded = writeIdx - segBegin;
     if (recorded <= 0 || k < params.progressiveStart)
         return;
-    if (params.cueSource == CueSource::Random || params.cueSource == CueSource::Frozen)
-        return; // only a live cue unfolds within the bar
+    if (params.cueSource == CueSource::Random || params.cueSource == CueSource::Frozen
+        || params.cueSource == CueSource::EchoChain)
+        return; // only a live cue unfolds within the bar (the chain steps at bar lines)
 
     // The bar so far, compared with the same stretch of every stored trace.
     cueFx().finalize (partialProbe, { params.featureMode, params.ternaryThreshold });
@@ -1679,8 +1776,25 @@ void EchoEngine::progressiveUpdate (int k) noexcept
     for (int i = 0; i < store->size(); ++i)
     {
         const int slot = store->storedSlot (i);
-        const float sim = focusedSimilarity (partialProbe, store->slot (slot).features, params.similarity,
-                                             params.featureFocus, firstSlot, k, renormalize);
+        const auto& t = store->slot (slot);
+        float sim;
+        if (! params.sequenceContext || params.contextCue == ContextCue::CurrentOnly)
+            sim = focusedSimilarity (partialProbe, t.features, params.similarity, params.featureFocus, firstSlot, k,
+                                     renormalize);
+        else if (params.contextCue == ContextCue::PredictNext)
+            // The bar so far against the same stretch of each trace's n-1 half.
+            sim = focusedSimilarity (partialProbe, t.context, params.similarity, params.featureFocus, firstSlot, k,
+                                     renormalize);
+        else
+            // Match Both: the whole previous bar against n-1, the bar so far against n.
+            sim = combineHalves (params.featureFocus == FeatureFocus::Full
+                                     ? similarity (prevHeard, t.context, params.similarity)
+                                     : focusedSimilarity (prevHeard, t.context, params.similarity, params.featureFocus,
+                                                          0, kSlots, false),
+                                 params.contextWeight,
+                                 focusedSimilarity (partialProbe, t.features, params.similarity, params.featureFocus,
+                                                    firstSlot, k, renormalize),
+                                 1.0f);
         weights[static_cast<size_t> (n++)] = { slot, sim, 0.0f, 0 };
     }
     const auto result = finishRetrieval (*store, retrievalSettings(), weights.data(), n);
@@ -2310,12 +2424,15 @@ void EchoEngine::publishView() noexcept
         if (slot < slots && v.thumbKeys[static_cast<size_t> (slot)] != key)
         {
             v.thumbKeys[static_cast<size_t> (slot)] = key;
-            auto* t = v.thumbs.data() + static_cast<size_t> (slot) * kFeatureSize;
-            for (int j = 0; j < kFeatureSize; ++j)
-            {
-                const float q = std::clamp (s.features[static_cast<size_t> (j)] * MemoryView::kThumbScale, -127.0f, 127.0f);
-                t[j] = static_cast<int8_t> (q >= 0.0f ? q + 0.5f : q - 0.5f);
-            }
+            auto quantise = [] (const FeatureVector& f, int8_t* t) {
+                for (int j = 0; j < kFeatureSize; ++j)
+                {
+                    const float q = std::clamp (f[static_cast<size_t> (j)] * MemoryView::kThumbScale, -127.0f, 127.0f);
+                    t[j] = static_cast<int8_t> (q >= 0.0f ? q + 0.5f : q - 0.5f);
+                }
+            };
+            quantise (s.features, v.thumbs.data() + static_cast<size_t> (slot) * kFeatureSize);
+            quantise (s.context, v.contextThumbs.data() + static_cast<size_t> (slot) * kFeatureSize);
         }
     }
     v.count = n;
@@ -2323,7 +2440,11 @@ void EchoEngine::publishView() noexcept
     v.clampLimit = maxClamped();
     v.intensity = stats.intensity.load (std::memory_order_relaxed);
     v.maxActivation = stats.maxActivation.load (std::memory_order_relaxed);
-    v.heard = probe;
+    v.heard = prevHeard;           // the last complete segment
+    v.heardBefore = heardBefore;   // and the one before it
+    v.sequence = params.sequenceContext;
+    v.contextCue = static_cast<int> (params.contextCue);
+    v.chain = params.cueSource == CueSource::EchoChain;
     v.version = ++viewVersion;
 
     viewBack = viewMiddle.exchange (viewBack | kViewDirty, std::memory_order_acq_rel) & 3;

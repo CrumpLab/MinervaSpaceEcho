@@ -23,6 +23,9 @@ One row per stored trace, **oldest at the top**. From left to right:
 | **Heads 1 2 3** | Which playback heads are playing the trace right now (1 amber, 2 teal, 3 violet); brighter = louder. |
 | **Address** | The trace's 384-number address exactly as MINERVA stores it: 16 time slots, left to right, each a 24-band spectrum from low to high. Amber is above the trace's average level, blue below. |
 
+With **Sequence Context** on, each address is shown as **[n−1 | n]**: the previous segment's address, a divider,
+then the trace's own ([Sequences](sequences.qmd)).
+
 Rows are tall while memory is nearly empty and shrink as it fills, so the view always fits; the space below the
 last row stands for free slots. With more traces than pixels (grain memories), each pixel row shows the
 strongest of the traces it covers.
@@ -43,6 +46,8 @@ many do.
 
 - **Heard**: the address of the last segment you played, which is what cued memory. Time runs left to right,
   low bands at the bottom.
+- With Sequence Context on, *Heard* shows the last two segments [n−1 | n] and *Echo* shows the echo's context half
+  and its *n* half, labelled "expected next" in Predict Next and Echo Chain.
 - **Echo**: the echo's content, the activation-weighted blend of the answering traces' addresses (MINERVA's
   echo). Compare it with *Heard* to see how memory reinterpreted what you played.
 - **Familiarity**: the strongest activation, as a bar, and MINERVA's **intensity** (the sum of activations).

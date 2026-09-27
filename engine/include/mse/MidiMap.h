@@ -6,7 +6,7 @@ namespace mse {
 // (default 36, C1 in Live):
 //   +0 Capture          +1 Freeze (held)     +2 Spectral Freeze (held)
 //   +3 Clamp Last       +4 Clamp All         +5 Unclamp All
-//   +6 Clear Unclamped  +7 Clear All
+//   +6 Clear Unclamped  +7 Clear All         +8 Echo Chain (held)
 //   +12 .. +20 Mode Selector: Custom, 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative
 enum class MidiAction
 {
@@ -20,6 +20,7 @@ enum class MidiAction
     ClearUnclamped,
     ClearAll,
     ModeSelector,    // `value` is the Mode Selector choice index
+    EchoChain,       // held: Cue Source = Echo Chain while the note is down
 };
 
 struct MidiMapping
@@ -44,6 +45,7 @@ constexpr MidiMapping midiMappingFor (int note, int baseNote) noexcept
         case 5: return { MidiAction::UnclampAll, 0 };
         case 6: return { MidiAction::ClearUnclamped, 0 };
         case 7: return { MidiAction::ClearAll, 0 };
+        case 8: return { MidiAction::EchoChain, 0 };
         default: break;
     }
     if (k >= kMidiModeOffset && k < kMidiModeOffset + kMidiModeCount)

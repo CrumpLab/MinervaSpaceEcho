@@ -58,11 +58,13 @@ Thirty-odd rendered examples, from a plain tape delay to grain clouds.
   the echo into a drone.
 - **Show its work.** A live view of the memory matrix: every trace's address, its activation, and which
   heads are playing it.
+- **Learn sequences.** Traces can hold the segment before them too, so memory anticipates what comes next,
+  and each echo can cue the next one (after Jamieson & Mewhort's model of sequence learning).
 - **Seed it.** Drop audio files in to fill memory; save and reload memories as plain WAV + JSON folders.
 - **Play it.** Presets, MIDI note control and automatable actions.
 
 ::: {.callout-warning}
-## Version 0.1.0
+## Version 0.2.0
 Every stage of the [build plan](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/plan.md) is in place and
 the plug-in passes Apple's `auval` and `pluginval`, but it has not yet been played much in Live. Expect rough
 edges and please [report problems](https://github.com/CrumpLab/MinervaSpaceEcho/issues).

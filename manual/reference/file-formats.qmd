@@ -44,7 +44,8 @@ Each `trace_NNNN.wav` is one trace's audio, 32-bit float, at the session's sampl
       "generation": 0,
       "merge_count": 1,
       "clamped": false,
-      "features": [0.41, -1.2, "… 384 values …"]
+      "features": [0.41, -1.2, "… 384 values …"],
+      "context": [0.12, 0.9, "… 384 values (optional) …"]
     }
   ]
 }
@@ -63,6 +64,7 @@ Each `trace_NNNN.wav` is one trace's audio, 32-bit float, at the session's sampl
 | `merge_count` | How many segments were consolidated into it. |
 | `clamped` | Locked against replacement. |
 | `features` | The address: 16 slots × 24 bands, slot-major (`index = slot × 24 + band`). |
+| `context` | Optional: the previous segment's address (the n−1 half, same layout). Missing means no context. |
 | `params` | The parameter values when the memory was saved (for reference; loading memory doesn't change settings). |
 
 Loading resamples memory saved at another sample rate. Newer format versions are refused by older plug-ins.

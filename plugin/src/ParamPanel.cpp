@@ -16,7 +16,7 @@ const std::vector<PageSpec>& pageSpecs()
 {
     static const std::vector<PageSpec> specs {
         { "Main", { "sync_mode", "trace_division", "trace_ms", "capacity", "power", "self_match", "cue_mode", "mode_selector",
-                    "blend_domain", "freeze", "feedback", "echo_level_db", "dry_level_db" } },
+                    "blend_domain", "sequence_context", "freeze", "feedback", "echo_level_db", "dry_level_db" } },
         { "Memory", { "capacity", "memory_budget", "full_policy", "merge_threshold", "freeze", "write_mode", "write_gate_db",
                       "novelty_mode", "novelty_threshold", "write_probability", "record_source", "clamp_incoming",
                       "clamp_budget", "clamp_protects" } },
@@ -25,6 +25,8 @@ const std::vector<PageSpec>& pageSpecs()
                          "negative_mode", "normalization", "level_tracking", "recency", "feature_focus" } },
         { "Cueing", { "cue_mode", "cue_source", "progressive_start", "rolling_window_ms", "rolling_interval_ms",
                       "lookahead_ms", "cue_smoothing_ms" } },
+        { "Sequence", { "sequence_context", "context_cue", "context_weight", "cue_source", "chain_input", "power",
+                        "self_match", "playback", "cue_mode" } },
         { "Heads", { "mode_selector", "head1_level_db", "head1_pan", "head2_mode", "head2_level_db", "head2_pan", "head3_mode",
                      "head3_level_db", "head3_pan", "playback", "voices", "voice_spread", "voice_detune", "voice_delay_ms" } },
         { "Tape", { "length_mismatch", "wow", "flutter", "tape_drive", "hiss_db", "feedback_bass_db", "feedback_treble_db",
@@ -273,6 +275,13 @@ void ParamPanel::updateRelevance()
                 relevant = value ("novelty_mode") != static_cast<int> (mse::NoveltyMode::Off);
             else if (id == "head2_mode" || id == "head3_mode")
                 relevant = custom;
+            else if (id == "context_cue")
+                relevant = value ("sequence_context") != 0;
+            else if (id == "context_weight")
+                relevant = value ("sequence_context") != 0 && value ("context_cue") == static_cast<int> (mse::ContextCue::MatchBoth)
+                           && value ("cue_source") != static_cast<int> (mse::CueSource::EchoChain);
+            else if (id == "chain_input")
+                relevant = value ("cue_source") == static_cast<int> (mse::CueSource::EchoChain);
             else if (id == "midi_channel" || id == "midi_base_note")
                 relevant = value ("midi_control") != 0;
             c->setAlpha (relevant ? 1.0f : 0.4f);

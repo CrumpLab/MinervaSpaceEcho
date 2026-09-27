@@ -12,7 +12,7 @@ Brooklyn College of CUNY.
 **Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: version 0.1.0.** Every stage of the plan is built (see
+**Status: version 0.2.0.** Every stage of the plan is built (see
 [`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
 
 The plugin cuts the input into traces
@@ -31,7 +31,10 @@ spring reverb. Stage 6 can blend memories as spectra instead of waveforms,
 time-stretch old traces to a new repeat rate without changing pitch, freeze
 the echo's spectrum into a drone, and hold thousands of tiny "grain" traces.
 Stage 7 gives it its own window, built around a live view of the memory
-matrix, plus presets, drag-and-drop audio import and MIDI control.
+matrix, plus presets, drag-and-drop audio import and MIDI control. Stage 9
+adds sequential context after Jamieson and Mewhort (2009): traces store
+[n−1 | n], so memory can anticipate what comes next, and each echo can cue the
+next one.
 
 ![The plugin window](docs/screenshot.png)
 
@@ -83,9 +86,11 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Rolling Window** / **Rolling Interval** | Length of the live cue, and how often memory is searched. |
 | **Prediction** | Play memory this far ahead of the current position: hear what came next last time. |
 | **Cue Smoothing** | Crossfade whenever a live cue changes the echo. |
-| **Cue Source** | What cues memory: the Input, the **Sidechain** (route another track to the plugin's sidechain input in Live), a Random address (memory dreams), or Frozen (the last live cue, held). |
+| **Cue Source** | What cues memory: the Input, the **Sidechain** (route another track to the plugin's sidechain input in Live), a Random address (memory dreams), Frozen (the last live cue, held), or **Echo Chain** (each echo cues the next). |
 | **Feature Focus** | Match on everything, on Rhythm only (loudness over time), or on Timbre only (average spectrum). Applies to Segment and Progressive cueing. |
 | **Recency** | Favour recently stored traces (0 = no preference). |
+| **Sequence Context** / **Context Cue** / **Context Weight** | Traces store the previous segment's address too, [n−1 \| n]. **Predict Next** matches the segment just played against traces' n−1 halves, so you hear what came next last time; **Match Both** recalls the trace matching the last two segments; **Current Only** ignores context. Context Weight sets how much n−1 counts in Match Both. |
+| **Chain Input** | With Cue Source = **Echo Chain**, each echo's expected next segment cues the next echo. 0: memory walks its sequences on its own; 1: the input steers it (= Predict Next). |
 | **Mode Selector** | The RE-201's head combinations: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3 (delay heads), Iterative 1+2+3, or Custom (use the per-head settings). |
 | **Head 1–3 Level / Pan**, **Head 2 / Head 3** | Head 1 is the main echo. A **Delay** head replays what head 1 played 1 (head 2) or 2 (head 3) segments earlier, like tape heads further along. An **Iterative** head is cued by the previous head's echo (the echo of the echo), drifting toward memory's prototype. Heads 2–3 update at bar lines (not in Rolling mode). |
 | **Playback** / **Voices** / **Voice Spread** / **Voice Detune** / **Voice Delay** | Blend all active memories (MINERVA's echo), play the strongest few as separate chorus **Voices** (the strongest in the centre, the rest fanned out, detuned and delayed), or **Sample** one memory at random, weighted by activation. |
@@ -171,6 +176,7 @@ actions, counted from **MIDI Base Note** (default 36, C1 in Live):
 | Note | Action | Note | Action |
 |---|---|---|---|
 | C1 | Capture | G1 | Clear All |
+| | | G#1 | Echo Chain, while held |
 | C#1 | Freeze Memory, while held | C2 | Mode Selector: Custom |
 | D1 | Spectral Freeze, while held | C#2 … G#2 | Mode Selector: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative |
 | D#1 | Clamp Last | | |
@@ -287,7 +293,7 @@ This is experimental software, written with help from [Claude Code](https://clau
 
 GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
 
-> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.2.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 

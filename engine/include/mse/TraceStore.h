@@ -42,8 +42,9 @@ struct TraceSlot
     int generation = 0;       // 0 = heard; n = echo of generation n-1 material
     int mergeCount = 1;       // how many segments were consolidated into this trace
     bool clamped = false;     // clamped traces are never replaced (or decayed, optionally)
-    uint32_t featureVersion = 0; // bumped whenever `features` change after storing (UI thumbnails)
-    FeatureVector features {};
+    uint32_t featureVersion = 0; // bumped whenever `features` or `context` change after storing (UI thumbnails)
+    FeatureVector features {};   // the address: this segment (n)
+    FeatureVector context {};    // the previous segment's address (n-1); all 0 = none (Stage 9)
 
     void resetMeta() noexcept
     {
