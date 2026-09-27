@@ -598,6 +598,123 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
     (.pkg); CI signs and notarizes when Developer ID secrets are present
     (docs/RELEASING.md) and turns `v*` tags into GitHub releases.
 
+### Stage 9: Sequential context (Jamieson & Mewhort) — proposed, for review
+
+**Idea.** Jamieson and Mewhort (2009) extended MINERVA to the serial
+reaction-time task by storing each event together with the event before it,
+much as an Elman network feeds its previous hidden state back in as context.
+Here that becomes: each trace's **address** is the concatenation
+**[n−1 | n]**, the previous segment's features followed by the current
+segment's. The address doubles from 384 to 768 values. Trace **audio** is
+unchanged: it is still just the current segment, so memory use and playback
+are the same and context only changes *which* traces are retrieved.
+
+**Decisions (from review):** audio = current segment only; how the live input
+cues memory is a choice; the self-cueing chain can run freely *or* be steered
+by the input; context depth = n−1 only.
+
+#### What gets stored
+
+At the end of segment *k*, with heard features *h*<sub>k</sub>, the trace is
+T<sub>k</sub> = [*h*<sub>k−1</sub> | *h*<sub>k</sub>]. The first segment after
+a start, clear or transport jump has an empty context half (all 0 — MINERVA's
+"not encoded", which similarity ignores). Echo re-encoding stores
+[previous echo | echo]. Imported audio gets the previous chunk of the same file
+as context (the first chunk's is empty).
+
+#### Cueing (new parameter **Context Cue**)
+
+| Choice | Probe | Heard during segment k+1 |
+|---|---|---|
+| **Match Both** | [*h*<sub>k−1</sub> \| *h*<sub>k</sub>] | Traces that match the *transition* just played: recall that is sequence-sensitive (the same bar is recalled differently depending on what came before). |
+| **Predict Next** | [*h*<sub>k</sub> \| 0] | Traces whose *context* resembles the segment just played; their audio is what *followed* similar material before. J&M's anticipation: the echo is memory's expectation of the next segment, in time with it. |
+| **Current Only** | [0 \| *h*<sub>k</sub>] | Ordinary MINERVA II recall; context is stored but ignored. |
+
+**Context Weight** (0–1) scales the context half's contribution to similarity
+in Match Both (0 = Current Only, 1 = both halves equal).
+
+#### The self-cueing chain (new cue source **Echo Chain**)
+
+Each echo has content: the activation-weighted blend of the answering traces'
+addresses. Its *n* half is memory's prediction of the next segment. With Cue
+Source = **Echo Chain**, each segment's probe is built from the previous echo
+instead of (or as well as) the input:
+
+probe<sub>k+1</sub> = [ (1 − *w*) · echo<sub>k</sub>(n half) + *w* · *h*<sub>k</sub> | 0 ]
+
+- **Chain Input** *w* = 0: pure free-running. The model walks through its
+  traces by its own expectations, one segment at a time, ignoring the input:
+  a memory-driven sequencer that plays back the most expected continuations.
+- *w* between 0 and 1: the input steers the walk (like Elman context units
+  mixing the previous state with the new input).
+- *w* = 1: the same as Predict Next from the input.
+- The chain starts from the last live segment when switched on. If memory
+  gives no echo (empty memory, or everything below the cue gate), it restarts
+  from the next live segment.
+- Existing tools still apply: Activation Power (higher = more deterministic
+  walks, lower = blends of possible continuations), Sample playback (a
+  stochastic walk: one continuation drawn per step), Recency, Freeze.
+
+#### Scope and interactions
+
+- **Off by default.** With **Sequence Context** off, addresses keep an all-zero
+  context half, which both similarity measures ignore, so behaviour stays
+  bit-for-bit as now (the exact-delay tests must still pass).
+- **Cue modes:** Segment and Progressive (Progressive matches the part of the
+  current bar heard so far plus the full context half). Rolling cueing searches
+  frame tracks, not addresses, so context does not apply there (dimmed in the
+  UI).
+- **Heads:** Delay heads unchanged. Iterative heads cue with the previous
+  head's echo using the same Context Cue rule, so Predict Next + Iterative
+  1+2+3 plays the next three expected segments at once.
+- **Feature Focus, encoding failure, forgetting, consolidation, novelty gate:**
+  apply to the whole 768-value address.
+- **Saved memory:** manifest format version 2 with 768-value features;
+  version-1 memories load with empty context halves.
+- **CPU:** similarity costs twice as much with context on. Negligible for
+  normal memories; grain memories of thousands of traces may need a lower
+  Max Active Traces.
+
+#### UI
+
+- Matrix: address columns double, drawn as **[n−1 | n]** with a divider; the
+  caption says which half the current Context Cue compares.
+- Side panel: **Heard** shows [previous | current]; **Echo** shows its context
+  half and its *n* half, labelled "expected next" in Predict Next and Echo
+  Chain; the selected trace shows both halves.
+- New controls on a **Sequence** page (Sequence Context, Context Cue, Context
+  Weight, Chain Input) and Echo Chain in the Cue Source menu. MIDI: a note to
+  start/stop the chain (e.g. base + 8).
+
+#### Tests
+
+- Context off: every existing test unchanged; capacity-1 delay still exact.
+- Store a repeating sequence of distinct tones A B C D. Predict Next after A:
+  the B trace has the highest activation and the echo correlates with B.
+- Match Both disambiguates: in A-B-C … D-B-E, the probe [A | B] recalls the
+  B that followed A, not the B that followed D.
+- Echo Chain, Chain Input 0: after one seed segment of A and silence
+  afterwards, the chain plays B, C, D, A, B … in order, and keeps going.
+- Chain Input 1 gives the same echo as Predict Next.
+- Imports get sequential context; version-1 memory files load with empty
+  context halves.
+- Smoothing, edge-case and ASan runs as for Stage 8.
+
+#### Examples, presets, docs
+
+- Listening examples: *anticipation* (Predict Next over the style-change
+  file), *context disambiguates* (a sequence with a shared element),
+  *memory sequencer* (Echo Chain free-running after 8 bars, input off),
+  *steered chain* (Chain Input 0.5).
+- Factory presets: **Anticipate**, **Sequence Memory**, **Dreaming Sequencer**.
+- Manual: a "Sequences" section in *How MINERVA works* (J&M and Elman), a
+  user-guide page, parameter reference (generated), listening examples.
+
+References: Jamieson, R. K., & Mewhort, D. J. K. (2009). Applying an exemplar
+model to the serial reaction-time task: Anticipating from experience.
+*Quarterly Journal of Experimental Psychology, 62*(9), 1757–1783. Elman, J. L.
+(1990). Finding structure in time. *Cognitive Science, 14*(2), 179–211.
+
 ---
 
 ## 9. Decisions
