@@ -17,6 +17,7 @@ add_executable(mse_tests
     TapeTests.cpp
     SpectralTests.cpp
     ControlTests.cpp
+    EdgeTests.cpp
 )
 target_compile_definitions(mse_tests PRIVATE MSE_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
 target_link_libraries(mse_tests PRIVATE mse_tools_common Catch2::Catch2WithMain)

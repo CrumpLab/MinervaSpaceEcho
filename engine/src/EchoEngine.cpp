@@ -127,6 +127,8 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
 
     const bool compatible = store && std::abs (store->sampleRate() - sampleRate) < 0.5
                             && store->numChannels() == numChannels;
+    if (! load && store && ! compatible && store->size() > 0)
+        load = std::make_unique<MemorySnapshot> (snapshotOf (*store)); // new rate or channels: resample memory
     if (load)
     {
         store = buildStoreFrom (*load, cfg, sampleRate, numChannels);
@@ -240,13 +242,23 @@ std::unique_ptr<TraceStore> EchoEngine::buildStoreFrom (const MemorySnapshot& so
         meta.clamped = t.clamped;
         meta.features = t.features;
 
-        // Audio laid out from segment position 0 (silence before `begin`).
-        std::vector<std::vector<float>> audio (t.audio.size());
+        // Audio laid out from segment position 0 (silence before `begin`);
+        // stereo memory loaded into a mono store is mixed down.
+        const bool downmix = ch == 1 && t.audio.size() > 1;
+        std::vector<std::vector<float>> audio (downmix ? 1 : t.audio.size());
         std::vector<const float*> ptrs;
-        for (size_t c = 0; c < t.audio.size(); ++c)
+        for (size_t c = 0; c < audio.size(); ++c)
         {
             audio[c].assign (static_cast<size_t> (t.begin), 0.0f);
-            audio[c].insert (audio[c].end(), t.audio[c].begin(), t.audio[c].end());
+            if (downmix)
+            {
+                for (size_t i = 0; i < t.audio[0].size(); ++i)
+                    audio[c].push_back (0.5f * (t.audio[0][i] + t.audio[1][i]));
+            }
+            else
+            {
+                audio[c].insert (audio[c].end(), t.audio[c].begin(), t.audio[c].end());
+            }
             ptrs.push_back (audio[c].data());
         }
         if (! ptrs.empty())
@@ -373,6 +385,39 @@ const MemoryView* EchoEngine::readMemoryView() noexcept
     return viewBuffers[static_cast<size_t> (viewFront)].get();
 }
 
+MemorySnapshot EchoEngine::snapshotOf (const TraceStore& store_)
+{
+    const TraceStore* st = &store_;
+    MemorySnapshot snap;
+    snap.sampleRate = st->sampleRate();
+    snap.channels = st->numChannels();
+    snap.capacity = st->capacity();
+    const int n = st->size();
+    snap.traces.reserve (static_cast<size_t> (n));
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& s = st->slot (st->storedSlot (i));
+        TraceRecord t;
+        const int64_t end = std::min (s.end, s.maxLen);
+        const int64_t begin = std::min (s.begin, end);
+        t.begin = begin;
+        t.audio.resize (static_cast<size_t> (snap.channels));
+        for (int c = 0; c < snap.channels; ++c)
+            t.audio[static_cast<size_t> (c)].assign (s.audio[c] + begin, s.audio[c] + end);
+        t.nominalLength = s.nominalLen;
+        t.serial = s.serial;
+        t.rms = s.rms;
+        t.strength = s.strength;
+        t.useCount = s.useCount;
+        t.generation = s.generation;
+        t.mergeCount = s.mergeCount;
+        t.clamped = s.clamped;
+        t.features = s.features;
+        snap.traces.push_back (std::move (t));
+    }
+    return snap;
+}
+
 bool EchoEngine::takeSnapshot (MemorySnapshot& out)
 {
     {
@@ -394,33 +439,7 @@ bool EchoEngine::takeSnapshot (MemorySnapshot& out)
         if ((before & 1u) == 0)
         {
             const TraceStore* st = liveStore.load (std::memory_order_acquire);
-            MemorySnapshot snap;
-            snap.sampleRate = st->sampleRate();
-            snap.channels = st->numChannels();
-            snap.capacity = st->capacity();
-            const int n = st->size();
-            snap.traces.reserve (static_cast<size_t> (n));
-            for (int i = 0; i < n; ++i)
-            {
-                const auto& s = st->slot (st->storedSlot (i));
-                TraceRecord t;
-                const int64_t end = std::min (s.end, s.maxLen);
-                const int64_t begin = std::min (s.begin, end);
-                t.begin = begin;
-                t.audio.resize (static_cast<size_t> (snap.channels));
-                for (int c = 0; c < snap.channels; ++c)
-                    t.audio[static_cast<size_t> (c)].assign (s.audio[c] + begin, s.audio[c] + end);
-                t.nominalLength = s.nominalLen;
-                t.serial = s.serial;
-                t.rms = s.rms;
-                t.strength = s.strength;
-                t.useCount = s.useCount;
-                t.generation = s.generation;
-                t.mergeCount = s.mergeCount;
-                t.clamped = s.clamped;
-                t.features = s.features;
-                snap.traces.push_back (std::move (t));
-            }
+            MemorySnapshot snap = snapshotOf (*st);
             std::atomic_thread_fence (std::memory_order_acquire);
             if (mutationSeq.load (std::memory_order_relaxed) == before)
             {
@@ -512,6 +531,11 @@ void EchoEngine::resetPlayback() noexcept
     nextSlot = 1;
     dryGain = levelToGain (params.dryLevelDb);
     echoGain = levelToGain (params.echoLevelDb);
+    fbGain = feedbackNow = std::clamp (params.feedback, 0.0f, 1.2f);
+    driveMix = params.tapeDrive > 0.0f ? 1.0f : 0.0f;
+    driveK = 1.0f + 4.0f * params.tapeDrive;
+    eqBassDb = params.feedbackBassDb;
+    eqTrebleDb = params.feedbackTrebleDb;
     outGain = std::pow (10.0f, params.outputGainDb / 20.0f);
     lastClock = {};
     stats.intensity = 0.0f;
@@ -746,6 +770,42 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     if (store == nullptr || numSamples <= 0)
         return;
     ioChannels = std::clamp (ioChannels, 1, kMaxChannels);
+
+    // Non-finite input (a misbehaving plugin upstream) must never reach memory.
+    for (int c = 0; c < ioChannels; ++c)
+        for (int i = 0; i < numSamples; ++i)
+            if (! std::isfinite (io[c][i]))
+                io[c][i] = 0.0f;
+
+    // Hosts may send more than they announced (offline bounces): split.
+    if (numSamples > maxBlockSize)
+    {
+        const double samplesPerQuarter = sampleRate * 60.0 / std::max (1.0, clock.bpm);
+        for (int done = 0; done < numSamples; done += maxBlockSize)
+        {
+            const int len = std::min (maxBlockSize, numSamples - done);
+            float* part[kMaxChannels] {};
+            const float* scPart[kMaxChannels] {};
+            for (int c = 0; c < ioChannels; ++c)
+                part[c] = io[c] + done;
+            const int scCh = std::clamp (sidechainChannels, 0, kMaxChannels);
+            for (int c = 0; c < scCh && sidechain != nullptr; ++c)
+                scPart[c] = sidechain[c] + done;
+            HostClock sub = clock;
+            sub.ppqPosition = clock.ppqPosition + done / samplesPerQuarter;
+            processBlock (part, ioChannels, len, sub, sidechain != nullptr ? scPart : nullptr, scCh);
+        }
+        lastClock = clock;
+        return;
+    }
+    processBlock (io, ioChannels, numSamples, clock, sidechain, sidechainChannels);
+}
+
+void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
+                               const float* const* sidechain, int sidechainChannels) noexcept
+{
+    lastClock = clock;
+    ioChannels = std::clamp (ioChannels, 1, kMaxChannels);
     sidechainActive = params.cueSource == CueSource::Sidechain && sidechain != nullptr && sidechainChannels > 0;
 
     if (holdRequests.load (std::memory_order_acquire) == 0)
@@ -822,26 +882,45 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
     familiarity += (familiarityTarget - familiarity) * (1.0f - std::exp (-n / (0.1f * static_cast<float> (sampleRate))));
     const float fam = 2.0f * familiarity - 1.0f; // -1 unfamiliar .. +1 familiar
     feedbackNow = std::clamp (params.feedback + 0.5f * params.intensityToFeedback * fam, 0.0f, 1.2f);
+    fbInc = (feedbackNow - fbGain) / n; // glides over the block
     toneActive = params.echoToneHz < 19999.0f || params.intensityToTone != 0.0f;
 
     // Tape character.
-    motionActive = params.wow > 0.0f || params.flutter > 0.0f;
-    driveK = params.tapeDrive > 0.0f ? 1.0f + 4.0f * params.tapeDrive : 0.0f;
+    motionActive = params.wow > 0.0f || params.flutter > 0.0f || motion.isMoving();
+    // Drive: the curve's steepness glides, and switching it on or off
+    // crossfades between clean and saturated.
+    {
+        const bool on = params.tapeDrive > 0.0f;
+        const float kTarget = on ? 1.0f + 4.0f * params.tapeDrive : driveK;
+        if (driveMix <= 0.0f && on)
+            driveK = kTarget;
+        driveKInc = (kTarget - driveK) / n;
+        driveMixInc = ((on ? 1.0f : 0.0f) - driveMix) / n;
+    }
     hissGain = params.hissDb > kGateOffDb ? std::pow (10.0f, params.hissDb / 20.0f) : 0.0f;
-    feedbackEq.set (params.feedbackBassDb, params.feedbackTrebleDb);
+    // The feedback shelves move at most 0.25 dB per block (~20 dB/s), so
+    // sweeping them doesn't step what gets recorded.
+    eqBassDb += std::clamp (params.feedbackBassDb - eqBassDb, -0.25f, 0.25f);
+    eqTrebleDb += std::clamp (params.feedbackTrebleDb - eqTrebleDb, -0.25f, 0.25f);
+    feedbackEq.set (eqBassDb, eqTrebleDb);
     feedbackEqActive = ! feedbackEq.isFlat();
     const float newSpringGain = levelToGain (params.springLevelDb);
-    if (newSpringGain > 0.0f && springGain == 0.0f)
+    if (newSpringGain > 0.0f && springGain <= 0.0f)
         spring.reset(); // start from silence, not an old tail
-    springGain = newSpringGain;
-    if (springGain > 0.0f)
+    springTarget = newSpringGain;
+    springInc = (springTarget - springGain) / n; // glides over the block
+    if (springTarget > 0.0f || springGain > 0.0f)
         spring.setDecay (params.springDecaySeconds);
     if (toneActive)
     {
         const double fc = std::clamp (params.echoToneHz * std::pow (2.0, 3.0 * params.intensityToTone * fam), 20.0,
                                       0.45 * sampleRate);
-        toneCoeff = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
+        const auto target = static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * fc / sampleRate));
+        if (! toneWasActive)
+            toneCoeff = target;
+        toneInc = (target - toneCoeff) / n; // the cutoff glides over the block
     }
+    toneWasActive = toneActive;
 
     // Rolling cue: search memory incrementally, a bounded amount per block.
     if (params.cueMode == CueMode::Rolling)
@@ -887,6 +966,9 @@ void EchoEngine::process (float* const* io, int ioChannels, int numSamples, cons
 
     dryGain = levelToGain (params.dryLevelDb);
     echoGain = levelToGain (params.echoLevelDb);
+    springGain = springTarget;
+    fbGain = feedbackNow;
+    driveMix = std::round (driveMix); // settles exactly at 0 or 1
     {
         HeadMode modes[kNumHeads];
         effectiveHeads (modes, headGainNow);
@@ -1430,6 +1512,7 @@ void EchoEngine::installEcho (int head, const EchoWeight* src, int n, float trac
         e.begin = s.begin;
         e.end = s.end;
         e.offset = w.offset + lookahead - voiceDelay;
+        e.fade = std::min (fadeSamples, (s.end - s.begin) / 4); // fixed while it plays
         e.weight = g;
         e.slot = w.slot;
         e.toneCoeff = coeff;
@@ -1803,7 +1886,7 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
         for (int k = 0; k < pl.count; ++k)
         {
             auto& e = pl.entries[static_cast<size_t> (k)];
-            const int64_t fade = std::min (fadeSamples, (e.end - e.begin) / 4);
+            const int64_t fade = e.fade;
             for (int c = 0; c < ioChannels; ++c)
             {
                 const float chanGain = ioChannels == 1 ? 0.5f * (e.gain[0] + e.gain[1]) : e.gain[c];
@@ -1821,8 +1904,28 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
                     iBegin = static_cast<int> (std::clamp<int64_t> (e.begin - base, 0, len));
                     iEnd = static_cast<int> (std::clamp<int64_t> (e.end - base, 0, len));
                 }
+                // Fast path: at normal speed, away from the trace's edges and
+                // from any crossfade, a sample is just source x gain.
+                int pBegin = iBegin, pEnd = iBegin;
+                if (exact && e.toneCoeff >= 1.0f && ! (pl.rampLen > 0 && pl.fadingOut))
+                {
+                    const int64_t base = pl.pos + e.offset;
+                    const int64_t rampDone = pl.rampLen > 0 ? pl.rampLen - pl.rampPos - 1 : 0; // first i with ramp == 1
+                    pBegin = static_cast<int> (std::clamp<int64_t> (std::max (e.begin + fade - base, rampDone), iBegin, iEnd));
+                    pEnd = static_cast<int> (std::clamp<int64_t> (e.end - fade - base, pBegin, iEnd));
+                    const float* __restrict s = src + base;
+                    float* __restrict d = dst;
+                    const float g0 = chanGain * hg0, gi = chanGain * hgInc;
+                    for (int i = pBegin; i < pEnd; ++i)
+                        d[i] += s[i] * (g0 + gi * static_cast<float> (i));
+                }
                 for (int i = iBegin; i < iEnd; ++i)
                 {
+                    if (i == pBegin && pEnd > pBegin)
+                    {
+                        i = pEnd - 1; // done above
+                        continue;
+                    }
                     // Read position in the trace (varispeed for detuned voices).
                     float x;
                     int64_t t;
@@ -2025,24 +2128,34 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         {
             float* e = echoBuf[static_cast<size_t> (c)].data();
             float z = toneZ[c];
+            float k = toneCoeff;
             for (int i = 0; i < len; ++i)
             {
-                z += toneCoeff * (e[i] - z);
+                z += k * (e[i] - z);
                 e[i] = z;
+                k += toneInc;
             }
             toneZ[c] = z;
         }
+    if (toneActive)
+        toneCoeff += toneInc * static_cast<float> (len);
 
     // Tape drive (soft saturation, unity gain for small signals) and hiss.
-    if (driveK > 0.0f || hissGain > 0.0f)
+    const bool driving = driveMix > 0.0f || driveMixInc > 0.0f;
+    if (driving || hissGain > 0.0f)
         for (int c = 0; c < ioChannels; ++c)
         {
             float* e = echoBuf[static_cast<size_t> (c)].data();
+            float k = driveK, mix = driveMix;
             for (int i = 0; i < len; ++i)
             {
                 float v = e[i];
-                if (driveK > 0.0f)
-                    v = std::tanh (driveK * v) / driveK;
+                if (driving)
+                {
+                    v += mix * (std::tanh (k * v) / k - v);
+                    k += driveKInc;
+                    mix += driveMixInc;
+                }
                 if (hissGain > 0.0f)
                 {
                     hissRng = hissRng * 6364136223846793005ull + 1442695040888963407ull;
@@ -2055,6 +2168,9 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             }
         }
 
+    driveK += driveKInc * static_cast<float> (len);
+    driveMix = std::clamp (driveMix + driveMixInc * static_cast<float> (len), 0.0f, 1.0f);
+
     if (sidechainActive)
     {
         const float inv = 1.0f / static_cast<float> (scChannels);
@@ -2063,14 +2179,14 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             float m = 0.0f;
             for (int c = 0; c < scChannels; ++c)
                 m += sc[c][offset + i];
-            scMonoBuf[static_cast<size_t> (i)] = m * inv;
+            scMonoBuf[static_cast<size_t> (i)] = std::isfinite (m) ? m * inv : 0.0f;
         }
     }
 
     auto& spare = store->spareSlot (TraceStore::kInputSpare);
     auto& echoSpare = store->spareSlot (TraceStore::kEchoSpare);
     const int storeCh = store->numChannels();
-    const float fb = feedbackNow;
+
     const float invCh = 1.0f / static_cast<float> (ioChannels);
 
     for (int i = 0; i < len; ++i)
@@ -2084,7 +2200,7 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             float* ch = io[c] + offset;
             const float x = ch[i];
             const float e = echoBuf[static_cast<size_t> (c)][static_cast<size_t> (i)];
-            float fbSignal = fb * e;
+            float fbSignal = fbGain * e;
             if (feedbackEqActive)
                 fbSignal = feedbackEq.process (c, fbSignal); // RE-201 bass/treble act on the repeats
             rec[c] = recordEchoOnly ? e : softClip (x + fbSignal);
@@ -2092,7 +2208,7 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
             mono += rec[c];
             echoMono += e;
             float out = dryGain * x + echoGain * e;
-            if (springGain > 0.0f)
+            if (springGain > 0.0f || springInc > 0.0f)
                 out += springGain * spring.process (c, echoGain * e + (params.springOnDry ? dryGain * x : 0.0f));
             ch[i] = out;
         }
@@ -2127,6 +2243,8 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         }
         dryGain += dryInc;
         echoGain += echoInc;
+        springGain += springInc;
+        fbGain += fbInc;
     }
     features.push (monoBuf.data(), len, writeIdx);
     if (sidechainActive)

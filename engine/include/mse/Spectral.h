@@ -19,7 +19,7 @@ private:
     void transform (float* re, float* im, bool inverse) const noexcept;
     int n = 0;
     std::vector<int> bitrev;
-    std::vector<float> cosT, sinT;
+    std::vector<float> twRe, twImFwd, twImInv; // per-stage twiddles, contiguous
 };
 
 // One memory feeding a spectral frame (plan Stage 6).
@@ -59,7 +59,7 @@ private:
     Fft fft;
     std::vector<float> window;             // sqrt-Hann
     std::vector<float> re, im, re2, im2;
-    std::array<std::vector<float>, 2> mag, bestMag, bestPhase, bestFreq;
+    std::array<std::vector<float>, 2> mag, bestMag, bestRe, bestIm, prevRe, prevIm, bestHop, unitRe, unitIm;
     std::array<std::vector<unsigned char>, 2> bestStretched;
     std::array<std::vector<float>, 2> outPhase, frozenMag, binFreq; // binFreq: rad/sample of the last frames
     std::array<bool, 2> haveFrozen {};

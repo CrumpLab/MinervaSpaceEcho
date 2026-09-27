@@ -264,12 +264,40 @@ int runImport()
     return failures;
 }
 
+// Offline bounces: hosts may send blocks larger than prepareToPlay announced,
+// and may change the sample rate between renders.
+int runOffline()
+{
+    int failures = 0;
+    auto p = freshProcessor(); // prepared for 512-sample blocks
+    p->setNonRealtime (true);
+    juce::AudioBuffer<float> buf (2, 8192);
+    juce::MidiBuffer midi;
+    bool finite = true;
+    for (int b = 0; b < 12; ++b)
+    {
+        for (int i = 0; i < buf.getNumSamples(); ++i)
+            for (int c = 0; c < 2; ++c)
+                buf.setSample (c, i, 0.3f * static_cast<float> (std::sin (0.05 * (b * 8192 + i))));
+        p->processBlock (buf, midi);
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < buf.getNumSamples(); ++i)
+                finite = finite && std::isfinite (buf.getSample (c, i));
+    }
+    failures += check (finite, "8192-sample blocks with a 512-sample prepare");
+    const int stored = p->getStats().tracesStored;
+    failures += check (stored >= 3, "memory filled during the bounce");
+    p->prepareToPlay (96000.0, 1024);
+    failures += check (p->getStats().tracesStored == stored, "memory kept across a sample-rate change");
+    return failures;
+}
+
 } // namespace
 
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juce;
-    int failures = run (false) + run (true) + runMidi() + runPresets() + runImport();
+    int failures = run (false) + run (true) + runMidi() + runPresets() + runImport() + runOffline();
     std::printf (failures == 0 ? "ALL PASSED\n" : "%d FAILED\n", failures);
     return failures == 0 ? 0 : 1;
 }

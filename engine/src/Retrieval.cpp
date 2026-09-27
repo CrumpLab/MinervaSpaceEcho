@@ -11,30 +11,51 @@ constexpr float kNegligible = 1.0e-5f; // relative to the strongest activation
 
 float similarity (const FeatureVector& p, const FeatureVector& t, Similarity kind) noexcept
 {
-    double dot = 0.0;
+    // Eight independent float lanes so the loops vectorise; lanes are
+    // combined in double.
+    constexpr int kLanes = 8;
+    static_assert (kFeatureSize % kLanes == 0);
+    float dot[kLanes] {}, a[kLanes] {}, b[kLanes] {};
+    const float* __restrict pv = p.data();
+    const float* __restrict tv = t.data();
     if (kind == Similarity::Hintzman)
     {
-        int n = 0;
-        for (size_t j = 0; j < p.size(); ++j)
+        for (int j = 0; j < kFeatureSize; j += kLanes)
+            for (int l = 0; l < kLanes; ++l)
+            {
+                const float x = pv[j + l], y = tv[j + l];
+                dot[l] += x * y;
+                a[l] += (x != 0.0f || y != 0.0f) ? 1.0f : 0.0f; // features present in either
+            }
+        double d = 0.0, n = 0.0;
+        for (int l = 0; l < kLanes; ++l)
         {
-            dot += static_cast<double> (p[j]) * t[j];
-            n += (p[j] != 0.0f || t[j] != 0.0f) ? 1 : 0;
+            d += dot[l];
+            n += a[l];
         }
-        if (n == 0)
+        if (n <= 0.0)
             return 0.0f;
-        return static_cast<float> (std::clamp (dot / n, -1.0, 1.0));
+        return static_cast<float> (std::clamp (d / n, -1.0, 1.0));
     }
 
-    double pp = 0.0, tt = 0.0;
-    for (size_t j = 0; j < p.size(); ++j)
+    for (int j = 0; j < kFeatureSize; j += kLanes)
+        for (int l = 0; l < kLanes; ++l)
+        {
+            const float x = pv[j + l], y = tv[j + l];
+            dot[l] += x * y;
+            a[l] += x * x;
+            b[l] += y * y;
+        }
+    double d = 0.0, pp = 0.0, tt = 0.0;
+    for (int l = 0; l < kLanes; ++l)
     {
-        dot += static_cast<double> (p[j]) * t[j];
-        pp += static_cast<double> (p[j]) * p[j];
-        tt += static_cast<double> (t[j]) * t[j];
+        d += dot[l];
+        pp += a[l];
+        tt += b[l];
     }
     if (pp <= 0.0 || tt <= 0.0)
         return 0.0f;
-    return static_cast<float> (std::clamp (dot / std::sqrt (pp * tt), -1.0, 1.0));
+    return static_cast<float> (std::clamp (d / std::sqrt (pp * tt), -1.0, 1.0));
 }
 
 float activation (float s, float power) noexcept

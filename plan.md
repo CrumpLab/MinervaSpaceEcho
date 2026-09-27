@@ -577,6 +577,26 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
 - Optimization, parameter smoothing audit, edge cases (sample-rate changes,
   tempo changes mid-segment, offline bounce in Live).
 - Signed / notarized builds if you want to share it.
+- **Status:** done (version 0.1.0); awaiting a listen in Live.
+  - Edge cases: host blocks larger than announced are split inside the
+    engine (this used to overrun its buffers, which an offline bounce could
+    trigger); sample-rate and channel changes keep memory (resampled or
+    mixed down); NaN/Inf input is replaced by silence; tempo changes
+    mid-segment, transport loops, odd and zero-length blocks and
+    deterministic offline renders are tested.
+  - Smoothing audit: a test switches every continuous parameter back and
+    forth during a steady tone and compares the largest sample step with
+    the parameter held still. Wow and flutter depth (28x and 5x steps), spring
+    level (5x), echo tone, tape drive, feedback, the feedback shelves and
+    edge fade used to click; they now glide or are fixed per playing trace.
+  - Optimization: vectorised FFT (20.7 to 7.6 us per 2048 points), phases
+    taken once per bin, a fast path for plain playback, vectorised
+    similarity. Most presets are 1.5-2x faster, spectral ones ~2x (26-30x
+    realtime); renders are unchanged to within 2e-4. The memory view costs
+    the audio thread nothing measurable, even with 4000 traces.
+  - Release: `scripts/package_macos.sh` builds a zip and an installer
+    (.pkg); CI signs and notarizes when Developer ID secrets are present
+    (docs/RELEASING.md) and turns `v*` tags into GitHub releases.
 
 ---
 

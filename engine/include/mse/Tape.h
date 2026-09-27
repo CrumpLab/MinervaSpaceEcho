@@ -46,9 +46,12 @@ class TapeMotion
 public:
     void prepare (double sampleRate) noexcept;
     void fill (float* delaySamples, int n, float wow, float flutter) noexcept;
+    // Still wobbling (depth gliding back to zero after wow/flutter were turned off).
+    bool isMoving() const noexcept { return wowDepth > 1.0e-4 || flutterDepth > 1.0e-4; }
 
 private:
     double sr = 48000.0;
+    double wowDepth = 0.0, flutterDepth = 0.0; // samples, smoothed
     double wowPhase = 0.0, flutterPhase = 0.0, flutterPhase2 = 0.0;
     double drift = 0.0, driftTarget = 0.0;
     uint64_t rng = 0x5eed;

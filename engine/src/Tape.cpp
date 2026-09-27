@@ -88,15 +88,20 @@ void TapeMotion::prepare (double sampleRate) noexcept
     sr = sampleRate;
     wowPhase = flutterPhase = flutterPhase2 = 0.0;
     drift = driftTarget = 0.0;
+    wowDepth = flutterDepth = 0.0;
 }
 
 void TapeMotion::fill (float* out, int n, float wow, float flutter) noexcept
 {
-    const double wowDepth = wow * kMaxWowMs * 0.001 * sr;
-    const double flutterDepth = flutter * kMaxFlutterMs * 0.001 * sr;
+    // Depth changes glide (~50 ms): a jump in delay would be a jump in the audio.
+    const double wowTarget = wow * kMaxWowMs * 0.001 * sr;
+    const double flutterTarget = flutter * kMaxFlutterMs * 0.001 * sr;
+    const double depthCoeff = 1.0 - std::exp (-1.0 / (0.05 * sr));
     const double driftCoeff = 1.0 - std::exp (-1.0 / (0.7 * sr));
     for (int i = 0; i < n; ++i)
     {
+        wowDepth += (wowTarget - wowDepth) * depthCoeff;
+        flutterDepth += (flutterTarget - flutterDepth) * depthCoeff;
         // A slowly wandering wow rate keeps it from sounding like a clean LFO.
         if ((i & 1023) == 0)
         {

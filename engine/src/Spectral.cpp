@@ -13,6 +13,21 @@ float princarg (double phase) noexcept
 {
     return static_cast<float> (phase - kTwoPi * std::floor ((phase + kPi) / kTwoPi));
 }
+
+// One run of radix-2 butterflies; separate so the compiler can vectorise it.
+void butterflies (float* __restrict ar, float* __restrict ai, float* __restrict br, float* __restrict bi,
+                  const float* __restrict wr, const float* __restrict wi, int half) noexcept
+{
+    for (int k = 0; k < half; ++k)
+    {
+        const float xr = br[k] * wr[k] - bi[k] * wi[k];
+        const float xi = br[k] * wi[k] + bi[k] * wr[k];
+        br[k] = ar[k] - xr;
+        bi[k] = ai[k] - xi;
+        ar[k] += xr;
+        ai[k] += xi;
+    }
+}
 } // namespace
 
 // ---- Fft ---------------------------------------------------------------------
@@ -31,13 +46,20 @@ void Fft::prepare (int size)
             r |= ((i >> b) & 1) << (bits - 1 - b);
         bitrev[static_cast<size_t> (i)] = r;
     }
-    cosT.resize (static_cast<size_t> (n / 2));
-    sinT.resize (static_cast<size_t> (n / 2));
-    for (int i = 0; i < n / 2; ++i)
-    {
-        cosT[static_cast<size_t> (i)] = static_cast<float> (std::cos (kTwoPi * i / n));
-        sinT[static_cast<size_t> (i)] = static_cast<float> (std::sin (kTwoPi * i / n));
-    }
+    // Twiddles stage by stage, contiguous (stage with half-length h starts at
+    // h - 1), so the butterfly loops read them in order and vectorise.
+    twRe.assign (static_cast<size_t> (std::max (1, n - 1)), 0.0f);
+    twImFwd.assign (twRe.size(), 0.0f);
+    twImInv.assign (twRe.size(), 0.0f);
+    for (int half = 1; half < n; half <<= 1)
+        for (int k = 0; k < half; ++k)
+        {
+            const double a = kPi * k / half;
+            const auto idx = static_cast<size_t> (half - 1 + k);
+            twRe[idx] = static_cast<float> (std::cos (a));
+            twImFwd[idx] = static_cast<float> (-std::sin (a));
+            twImInv[idx] = static_cast<float> (std::sin (a));
+        }
 }
 
 void Fft::transform (float* re, float* im, bool inverse) const noexcept
@@ -51,23 +73,22 @@ void Fft::transform (float* re, float* im, bool inverse) const noexcept
             std::swap (im[i], im[j]);
         }
     }
-    const float sign = inverse ? 1.0f : -1.0f;
-    for (int len = 2; len <= n; len <<= 1)
+    // First stage: twiddle 1.
+    for (int i = 0; i + 1 < n; i += 2)
     {
-        const int half = len / 2, step = n / len;
-        for (int i = 0; i < n; i += len)
-            for (int k = 0; k < half; ++k)
-            {
-                const float wr = cosT[static_cast<size_t> (k * step)];
-                const float wi = sign * sinT[static_cast<size_t> (k * step)];
-                const int a = i + k, b = a + half;
-                const float xr = re[b] * wr - im[b] * wi;
-                const float xi = re[b] * wi + im[b] * wr;
-                re[b] = re[a] - xr;
-                im[b] = im[a] - xi;
-                re[a] += xr;
-                im[a] += xi;
-            }
+        const float xr = re[i + 1], xi = im[i + 1];
+        re[i + 1] = re[i] - xr;
+        im[i + 1] = im[i] - xi;
+        re[i] += xr;
+        im[i] += xi;
+    }
+    const float* twI = inverse ? twImInv.data() : twImFwd.data();
+    for (int half = 2; half < n; half <<= 1)
+    {
+        const float* wr = twRe.data() + half - 1;
+        const float* wi = twI + half - 1;
+        for (int i = 0; i < n; i += 2 * half)
+            butterflies (re + i, im + i, re + i + half, im + i + half, wr, wi, half);
     }
 }
 
@@ -89,7 +110,8 @@ void SpectralRenderer::prepare (double sampleRate, int /*maxChannels*/)
     const size_t bins = n / 2 + 1;
     for (int c = 0; c < 2; ++c)
     {
-        for (auto* v : { &mag[c], &bestMag[c], &bestPhase[c], &bestFreq[c], &outPhase[c], &frozenMag[c], &binFreq[c] })
+        for (auto* v : { &mag[c], &bestMag[c], &bestRe[c], &bestIm[c], &prevRe[c], &prevIm[c], &bestHop[c], &unitRe[c],
+                         &unitIm[c], &outPhase[c], &frozenMag[c], &binFreq[c] })
             v->assign (bins, 0.0f);
         bestStretched[c].assign (bins, 0);
     }
@@ -162,12 +184,15 @@ void SpectralRenderer::render (const SpectralSource* sources, int numSources, in
         frozenNow[c] = freeze && haveFrozen[static_cast<size_t> (c)];
         std::fill (mag[c].begin(), mag[c].end(), 0.0f);
         std::fill (bestMag[c].begin(), bestMag[c].end(), 0.0f);
-        std::fill (bestPhase[c].begin(), bestPhase[c].end(), 0.0f);
+        std::fill (bestRe[c].begin(), bestRe[c].end(), 0.0f);
+        std::fill (bestIm[c].begin(), bestIm[c].end(), 0.0f);
         std::fill (bestStretched[c].begin(), bestStretched[c].end(), 0);
     }
     const bool analyse = ! (frozenNow[0] && (channels == 1 || frozenNow[1]));
 
-    // Analysis: one packed transform per source (two if stretched).
+    // Analysis: one packed transform per source (two if stretched). Only the
+    // loudest source's complex value is kept per bin; phases are taken once,
+    // after all sources.
     for (int si = 0; analyse && si < numSources; ++si)
     {
         const auto& s = sources[si];
@@ -190,38 +215,34 @@ void SpectralRenderer::render (const SpectralSource* sources, int numSources, in
             const float g = std::abs (s.gain[c]);
             if (g <= 0.0f || frozenNow[c])
                 continue;
+            float* magC = mag[c].data();
+            float* bestM = bestMag[c].data();
             for (int k = 0; k < bins; ++k)
             {
                 const auto kk = static_cast<size_t> (k);
                 float xr, xi;
                 unpack (k, c, xr, xi);
-                const float m = g * std::hypot (xr, xi);
-                mag[c][kk] += m;
-                if (m <= bestMag[c][kk])
+                const float m = g * std::sqrt (xr * xr + xi * xi);
+                magC[k] += m;
+                if (m <= bestM[k])
                     continue;
-                bestMag[c][kk] = m;
-                const float ph = std::atan2 (xi, xr);
+                bestM[k] = m;
+                bestRe[c][kk] = xr;
+                bestIm[c][kk] = xi;
+                bestStretched[c][kk] = stretched ? 1 : 0;
                 if (stretched)
                 {
-                    // Previous frame's phase for this channel and bin.
                     const auto b = static_cast<size_t> ((n - k) % n);
-                    const float pr = c == 0 ? 0.5f * (re2[kk] + re2[b]) : 0.5f * (im2[kk] + im2[b]);
-                    const float pi = c == 0 ? 0.5f * (im2[kk] - im2[b]) : -0.5f * (re2[kk] - re2[b]);
-                    const double expected = kTwoPi * k * analysisHop / n;
-                    const double dphi = ph - std::atan2 (pi, pr);
-                    bestFreq[c][kk] = static_cast<float> ((expected + princarg (dphi - expected)) / analysisHop);
-                    bestStretched[c][kk] = 1;
-                }
-                else
-                {
-                    bestPhase[c][kk] = ph;
-                    bestStretched[c][kk] = 0;
+                    prevRe[c][kk] = c == 0 ? 0.5f * (re2[kk] + re2[b]) : 0.5f * (im2[kk] + im2[b]);
+                    prevIm[c][kk] = c == 0 ? 0.5f * (im2[kk] - im2[b]) : -0.5f * (re2[kk] - re2[b]);
+                    bestHop[c][kk] = static_cast<float> (analysisHop);
                 }
             }
         }
     }
 
-    // Phases and magnitudes per channel.
+    // Phases and magnitudes per channel. `unit` holds each bin's output phase
+    // as a unit phasor (cos, sin), so unstretched bins need no trigonometry.
     for (int c = 0; c < channels; ++c)
     {
         auto& phase = outPhase[static_cast<size_t> (c)];
@@ -239,13 +260,33 @@ void SpectralRenderer::render (const SpectralSource* sources, int numSources, in
                 const double jitter = (static_cast<double> (rng >> 40) / 16777216.0 - 0.5) * 0.08;
                 phase[kk] = princarg (phase[kk] + freq[kk] * H + jitter);
                 mag[c][kk] = held[kk];
+                unitRe[c][kk] = std::cos (phase[kk]);
+                unitIm[c][kk] = std::sin (phase[kk]);
             }
             continue;
         }
         for (int k = 0; k < bins; ++k)
         {
             const auto kk = static_cast<size_t> (k);
-            const float next = bestStretched[c][kk] ? princarg (phase[kk] + bestFreq[c][kk] * H) : bestPhase[c][kk];
+            const float xr = bestRe[c][kk], xi = bestIm[c][kk];
+            float next;
+            if (bestStretched[c][kk])
+            {
+                const double h = bestHop[c][kk];
+                const double expected = kTwoPi * k * h / n;
+                const double dphi = std::atan2 (xi, xr) - std::atan2 (prevIm[c][kk], prevRe[c][kk]);
+                const double f = (expected + princarg (dphi - expected)) / h;
+                next = princarg (phase[kk] + f * H);
+                unitRe[c][kk] = std::cos (next);
+                unitIm[c][kk] = std::sin (next);
+            }
+            else
+            {
+                next = std::atan2 (xi, xr);
+                const float r = std::sqrt (xr * xr + xi * xi);
+                unitRe[c][kk] = r > 0.0f ? xr / r : 1.0f;
+                unitIm[c][kk] = r > 0.0f ? xi / r : 0.0f;
+            }
             // Measured frequency of this bin (for freezing), smoothed over
             // frames so one frame where the echo switches memories can't
             // throw it off.
@@ -265,13 +306,13 @@ void SpectralRenderer::render (const SpectralSource* sources, int numSources, in
         const int kb = k < bins ? k : n - k; // mirror bin
         const float sgn = k < bins ? 1.0f : -1.0f;
         const auto kk = static_cast<size_t> (kb);
-        const float lr = mag[0][kk] * std::cos (outPhase[0][kk]);
-        const float li = sgn * mag[0][kk] * std::sin (outPhase[0][kk]);
+        const float lr = mag[0][kk] * unitRe[0][kk];
+        const float li = sgn * mag[0][kk] * unitIm[0][kk];
         float rr = 0.0f, ri = 0.0f;
         if (channels > 1)
         {
-            rr = mag[1][kk] * std::cos (outPhase[1][kk]);
-            ri = sgn * mag[1][kk] * std::sin (outPhase[1][kk]);
+            rr = mag[1][kk] * unitRe[1][kk];
+            ri = sgn * mag[1][kk] * unitIm[1][kk];
         }
         re[static_cast<size_t> (k)] = lr - ri;
         im[static_cast<size_t> (k)] = li + rr;

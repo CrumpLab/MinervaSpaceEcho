@@ -150,6 +150,7 @@ private:
         int64_t anchor;    // playlist pos where varispeed reading started
         double anchorTrace; // trace position read at `anchor`
         int64_t loopLen;   // > 0: loop the trace (Length Mismatch = Loop)
+        int64_t fade;      // edge fade at the trace's ends (samples)
     };
     struct Playlist
     {
@@ -162,6 +163,8 @@ private:
     };
 
     // audio thread helpers
+    void processBlock (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
+                       const float* const* sidechain, int sidechainChannels) noexcept; // numSamples <= maxBlockSize
     void resetPlayback() noexcept;
     void clearHeads() noexcept;
     void adoptPendingStore() noexcept;
@@ -211,6 +214,7 @@ private:
     float random01() noexcept;
 
     // non-real-time helpers
+    static MemorySnapshot snapshotOf (const TraceStore& store);
     std::unique_ptr<TraceStore> buildStoreFrom (const MemorySnapshot& snapshot, const MemoryConfig& cfg,
                                                 double sr, int ch) const;
 
@@ -269,9 +273,11 @@ private:
     FeatureVector iterCue {};
     float headGainNow[kNumHeads] { 1.0f, 0.0f, 0.0f };
     float headGainInc[kNumHeads] {};
-    float toneCoeff = 1.0f;
+    float toneCoeff = 1.0f, toneInc = 0.0f;   // echo tone low-pass, gliding per sample
+    bool toneWasActive = false;
     bool toneActive = false;
-    float feedbackNow = 0.0f;
+    float feedbackNow = 0.0f;          // this block's target
+    float fbGain = 0.0f, fbInc = 0.0f; // feedback gain, gliding per sample
 
     // tape character
     double installNominal = 0.0;    // segment length the echo being installed will play in (0: no varispeed)
@@ -280,10 +286,12 @@ private:
     SpringReverb spring;
     std::vector<float> motionBuf;
     bool motionActive = false;
-    float driveK = 0.0f;
+    float driveK = 1.0f, driveKInc = 0.0f;       // drive curve steepness, gliding
+    float driveMix = 0.0f, driveMixInc = 0.0f;   // 0 clean .. 1 saturated
+    float eqBassDb = 0.0f, eqTrebleDb = 0.0f;    // feedback shelves, slewed
     float hissGain = 0.0f, hissHp[kMaxChannels] {};
     uint64_t hissRng = 0x9e3779b97f4a7c15ull;
-    float springGain = 0.0f;
+    float springGain = 0.0f, springTarget = 0.0f, springInc = 0.0f; // spring return, gliding per sample
     bool feedbackEqActive = false;
 
     // spectral engine: per head, a renderer and an overlap-add ring

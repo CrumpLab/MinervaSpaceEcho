@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>MINERVA Space Echo @VERSION@</title>
+    <welcome file="welcome.txt" mime-type="text/plain"/>
+    <license file="LICENSE.txt" mime-type="text/plain"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="au"/>
+        <line choice="vst3"/>
+    </choices-outline>
+    <choice id="au" title="Audio Unit" description="For Live (with Audio Units enabled), Logic, GarageBand and other AU hosts.">
+        <pkg-ref id="@ID@.au"/>
+    </choice>
+    <choice id="vst3" title="VST3" description="For Live and other VST3 hosts. MIDI note control works with this format.">
+        <pkg-ref id="@ID@.vst3"/>
+    </choice>
+    <pkg-ref id="@ID@.au" version="@VERSION@" onConclusion="none">au.pkg</pkg-ref>
+    <pkg-ref id="@ID@.vst3" version="@VERSION@" onConclusion="none">vst3.pkg</pkg-ref>
+</installer-gui-script>

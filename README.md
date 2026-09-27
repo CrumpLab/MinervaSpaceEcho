@@ -8,7 +8,10 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 7 (custom UI and control).** The plugin cuts the input into traces
+**Status: version 0.1.0.** Every stage of the plan is built (see
+[`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
+
+The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
@@ -201,30 +204,43 @@ Presets can change settings partway through a render with timed lines such as
 | `tools/` | `mse-testgen` (synthetic test audio) and `mse-render` (offline WAV processing) |
 | `tests/` | Catch2 unit tests |
 | `presets/` | Presets (`key = value` lines): `factory/` (built into the plugin), `examples/` (listening examples, also built in) |
-| `docs/` | Screenshot (rendered headless by `mse-ui-snapshot`) |
+| `docs/` | Screenshot (rendered headless by `mse-ui-snapshot`), release instructions |
+| `scripts/` | Example renders, macOS packaging (`package_macos.sh`) |
 
 ## Getting a build on your Mac
 
-### Option A: download from CI
+### Option A: download a release or a CI build
 Every push builds a universal (Apple Silicon + Intel) AU and VST3 on GitHub
-Actions and validates them with `auval` and `pluginval`.
+Actions and validates them with `auval` and `pluginval`. Tagged versions are
+published on the repo's **Releases** page. For the latest build from any
+branch, open the **Actions** tab, pick a `build` run and download the
+`MinervaSpaceEcho-macOS` artifact.
 
-1. Open the repo's **Actions** tab, pick the latest `build` run, and download
-   the `MinervaSpaceEcho-macOS` artifact.
-2. Unzip it, then copy the plugins into place:
-   ```sh
-   cp -R "MINERVA Space Echo.component" ~/Library/Audio/Plug-Ins/Components/
-   cp -R "MINERVA Space Echo.vst3"      ~/Library/Audio/Plug-Ins/VST3/
-   ```
-3. The builds are ad-hoc signed (not notarized). Remove the download quarantine
-   so macOS will load them:
-   ```sh
-   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"MINERVA Space Echo.component"
-   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"MINERVA Space Echo.vst3"
-   ```
-4. In Live: **Settings → Plug-Ins**. Enable "Use Audio Units v2" and/or "Use
-   VST3 Plug-In System Folders", then **Rescan**. The plugin appears under
-   **CrumpLab**.
+Either way you get two files:
+
+- **`MinervaSpaceEcho-<version>-macOS.pkg`**: an installer that puts the AU
+  and VST3 in `/Library/Audio/Plug-Ins` (you can untick either format).
+- **`MinervaSpaceEcho-<version>-macOS.zip`**: the plug-in bundles, to copy by
+  hand:
+  ```sh
+  cp -R "MINERVA Space Echo.component" ~/Library/Audio/Plug-Ins/Components/
+  cp -R "MINERVA Space Echo.vst3"      ~/Library/Audio/Plug-Ins/VST3/
+  ```
+
+Unless the build was made with Developer ID signing (see
+[`docs/RELEASING.md`](docs/RELEASING.md)), macOS warns about it after download:
+
+- **Installer**: if it won't open, go to **System Settings → Privacy &
+  Security** and click **Open Anyway**.
+- **Zip**: remove the download quarantine from the copied bundles:
+  ```sh
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"MINERVA Space Echo.component"
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"MINERVA Space Echo.vst3"
+  ```
+
+Then in Live: **Settings → Plug-Ins**. Enable "Use Audio Units v2" and/or
+"Use VST3 Plug-In System Folders", then **Rescan**. The plugin appears under
+**CrumpLab**.
 
 ### Option B: build locally
 Requirements: Xcode command-line tools, CMake ≥ 3.22 (e.g. `brew install cmake ninja`).
