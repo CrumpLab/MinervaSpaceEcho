@@ -51,7 +51,11 @@ jobs:
       - uses: quarto-dev/quarto-actions/setup@v2
 
       - name: Render the site
-        run: quarto render manual
+        run: |
+          # Quarto resolves includes before its pre-render step runs, so the
+          # generated pages must exist first (pre-render refreshes them again).
+          python3 manual/_scripts/generate.py
+          quarto render manual
 
       - uses: actions/upload-pages-artifact@v3
         with:

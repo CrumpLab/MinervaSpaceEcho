@@ -69,9 +69,13 @@ build stops.
 
 ```sh
 cd manual
-quarto preview        # live preview in a browser
-quarto render         # build into manual/_site
+python3 _scripts/generate.py   # once, before the first render in a fresh clone
+quarto preview                 # live preview in a browser
+quarto render                  # build into manual/_site
 ```
+
+(Quarto resolves the generated includes before its pre-render step runs, so they must exist before the first
+render; after that, every render regenerates them.)
 
 `.github/workflows/docs.yml` renders the listening examples to MP3, builds the site and publishes it to GitHub
 Pages from the default branch.
