@@ -277,10 +277,12 @@ void MinervaSpaceEchoEditor::paint (juce::Graphics& g)
     const juce::FontOptions statsFont (12.0f);
     const int statsW = juce::GlyphArrangement::getStringWidthInt (statsFont, memoryText) + 12;
     cols.setRight (c.getRight() - statsW);
-    const juce::String address (sequenceView ? "ADDRESS  [n-1 | n]  (each: 16 time slots x 24 bands)"
-                                             : "ADDRESS  (16 time slots x 24 bands)");
-    g.drawText (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (11.0f, juce::Font::bold), address) < cols.getWidth()
-                    ? address : juce::String ("ADDRESS"),
+    const juce::String setName = juce::String (mse::addressSetName (shownSet)).toUpperCase();
+    const juce::String address (sequenceView ? "ADDRESS: " + setName + "  [n-1 | n]  (each: " + addressLayoutText (shownSet) + ")"
+                                             : "ADDRESS: " + setName + "  (" + addressLayoutText (shownSet) + ")");
+    const juce::FontOptions captionFont (11.0f, juce::Font::bold);
+    g.drawText (juce::GlyphArrangement::getStringWidthInt (captionFont, address) < cols.getWidth() ? address
+                                                                                                    : "ADDRESS: " + setName,
                 cols, juce::Justification::centredLeft);
     g.setFont (statsFont);
     g.setColour (theme::text);
@@ -463,6 +465,7 @@ void MinervaSpaceEchoEditor::refresh()
     if (const auto* view = processor.readMemoryView())
     {
         sequenceView = view->sequence;
+        shownSet = view->shownSet;
         matrix.update (*view);
         side.update (*view, matrix.getSelected());
     }

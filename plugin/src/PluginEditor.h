@@ -74,6 +74,7 @@ private:
     int midiFlash = 0;
     int shownBaseNote = -1;
     bool sequenceView = false;
+    int shownSet = 0; // address set the matrix shows
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MinervaSpaceEchoEditor)
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mse/Params.h"
+#include "mse/Spectral.h"
 
 #include <array>
 #include <cstdint>
@@ -8,12 +9,48 @@
 
 namespace mse {
 
-// A trace's address: K time slots x B frequency bands (plan §2.2).
+// A trace's address is made of address sets (Stage 10), each kSetSize values
+// laid out time slot by time slot. The Spectrum set is the original address
+// (plan §2.2): K time slots x B frequency bands.
 constexpr int kSlots = 16;
 constexpr int kBands = 24;
-constexpr int kFeatureSize = kSlots * kBands;
+constexpr int kSetSize = kSlots * kBands;
 
-using FeatureVector = std::array<float, kFeatureSize>; // index = slot * kBands + band
+// What each set describes. Every set is normalised (z-scored) on its own.
+//  Spectrum    24 log-spaced bands (60 Hz - 16 kHz) x 16 slots: brightness and envelope
+//  PitchClass  12 pitch classes (chroma) x 32 slots: harmony and melody, octave-blind
+//  Pitch       48 semitones (C2 - B5; lower partials folded up, higher ones left out) x 8 slots:
+//              melody with register
+//  Timbre      spectral shape (cepstrum, aligned to the fundamental) and brightness (place-coded
+//              centroid) x 16 slots: the sound, not the note
+//  Rhythm      onset strength in 4 frequency regions x 96 steps: attack pattern
+enum class AddressSet { Spectrum, PitchClass, Pitch, Timbre, Rhythm };
+constexpr int kNumSets = kNumAddressSets; // see Params.h
+constexpr int kAddressSize = kNumSets * kSetSize;
+
+struct SetLayout
+{
+    int slots; // time slots across the segment
+    int width; // values per slot (slot-major: index = slot * width + value)
+};
+constexpr std::array<SetLayout, kNumSets> kSetLayouts { { { 16, 24 }, { 32, 12 }, { 8, 48 }, { 16, 24 }, { 96, 4 } } };
+constexpr int setOffset (int set) noexcept { return set * kSetSize; }
+constexpr int setCells (int set) noexcept { return kSetLayouts[static_cast<size_t> (set)].slots * kSetLayouts[static_cast<size_t> (set)].width; }
+using SetVector = std::array<float, kSetSize>; // one set's values
+const char* addressSetName (int set) noexcept;
+
+constexpr int kPitchLow = 36;      // MIDI note of the Pitch set's first semitone (C2)
+constexpr int kPitchCount = 48;
+constexpr int kTimbreCoeffs = 12;
+constexpr int kRhythmSteps = 96;
+constexpr int kRhythmGroups = 4;
+
+using FeatureVector = std::array<float, kAddressSize>; // set s occupies [setOffset (s), setOffset (s) + kSetSize)
+
+// How much each set counts in a comparison (retrieval similarity is the
+// weighted mean of the sets' similarities; see Retrieval.h).
+using AddressWeights = std::array<float, kNumSets>;
+constexpr AddressWeights kSpectrumOnly { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 
 // Frame track (plan §3 Mode C): band levels (dB) every ~20 ms, used for the
 // unclocked rolling search. Frame f covers segment samples [f*hop, (f+1)*hop).
@@ -27,14 +64,19 @@ struct FeatureSettings
     float ternaryThreshold = 0.5f;
 };
 
-// Incremental band-energy analyser. A bank of band-pass biquads runs on the
-// mono signal; squared outputs are pooled into kSlots equal slices of the
-// segment's nominal length, so traces of any length (10 ms – 20 s) produce
-// comparable vectors. Real-time safe after prepare().
+// Incremental analyser. A bank of band-pass biquads runs on the mono signal;
+// squared outputs are pooled into equal slices of the segment's nominal
+// length, so traces of any length (10 ms – 20 s) produce comparable vectors.
+// A short-time FFT (~85 ms frames, 75 % overlap, restarted at each segment)
+// feeds the pitch sets; each frame counts toward the slot its centre falls
+// in, so segments shorter than about half a frame have no pitch sets (they
+// read as unencoded). Real-time
+// safe after prepare().
 class FeatureExtractor
 {
 public:
-    void prepare (double sampleRate);
+    // addressSets = false: only the Spectrum set and frames (cheaper).
+    void prepare (double sampleRate, bool addressSets = true);
 
     // Starts a new segment. nominalLength is the expected trace length in
     // samples; it decides which slot each sample position falls into. Complete
@@ -77,11 +119,28 @@ private:
         float z1 = 0, z2 = 0;
     };
 
+    void analyseFrame (int64_t endPosition) noexcept;
+
     std::array<Biquad, kBands> filters {};
     std::array<float, kBands> centres {};
-    std::array<double, kFeatureSize> energy {};
+    std::array<double, kSetSize> energy {};
     std::array<int64_t, kSlots> counts {};
-    double slotScale = 0.0; // kSlots / nominalLength
+    double slotScale = 0.0;   // kSlots / nominalLength
+    double nominal = 1.0;
+
+    // address sets (Stage 10)
+    bool sets = false;
+    std::array<double, static_cast<size_t> (kRhythmSteps) * kRhythmGroups> rhythmEnergy {};
+    std::array<int64_t, kRhythmSteps> rhythmCounts {};
+    double rhythmScale = 0.0;
+    Fft fft;
+    std::vector<float> window, fftRing, fftRe, fftIm;
+    double sampleRateHz = 48000.0;
+    int fftSize = 0, fftHop = 0, fftFill = 0, fftPos = 0, binLow = 0, binHigh = 0;
+    std::array<double, 12 * 32> chromaEnergy {};
+    std::array<int, 32> chromaCounts {};
+    std::array<double, static_cast<size_t> (kPitchCount) * 8> pitchEnergy {};
+    std::array<int, 8> pitchCounts {};
 
     // frames
     int frameHopSamples = 960;

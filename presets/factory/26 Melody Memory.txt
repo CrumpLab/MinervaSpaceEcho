@@ -1,0 +1,9 @@
+# Address = Pitch with Predict Next: each bar recalls what followed the same
+# notes (in the same register) before, so memory answers a melody with its
+# continuation.
+sequence_context = on
+context_cue = Predict Next
+address = Pitch
+capacity = 100
+power = 6
+echo_level_db = -6

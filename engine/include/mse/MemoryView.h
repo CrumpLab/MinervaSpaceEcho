@@ -3,6 +3,7 @@
 #include "mse/Features.h"
 #include "mse/Params.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -37,16 +38,18 @@ struct MemoryView
     float maxActivation = 0.0f;
     std::vector<TraceView> rows;
 
-    // Each trace's address (16 slots x 24 bands), quantised: value * kThumbScale.
+    // Each trace's address in the shown set (Stage 10: the most weighted
+    // address set; layout kSetLayouts[shownSet]), quantised: value * kThumbScale.
     // Stored per memory slot (traces keep their slot while others come and
     // go), so only new or changed traces are re-quantised.
     static constexpr float kThumbScale = 40.0f;
+    int shownSet = 0;                    // AddressSet index the thumbs show
     std::vector<int> rowSlot;            // per row: its memory slot
-    std::vector<int8_t> thumbs;          // per slot: kFeatureSize values
+    std::vector<int8_t> thumbs;          // per slot: kSetSize values
     std::vector<int8_t> contextThumbs;   // per slot: the context half (n-1), same layout
     std::vector<uint64_t> thumbKeys;     // per slot: which trace / feature version the thumb shows
 
-    FeatureVector heard {};    // features of the last segment heard (what cued memory)
+    FeatureVector heard {};    // address of the last segment heard (what cued memory), every set
     FeatureVector heardBefore {}; // the segment before it: [heardBefore | heard] is the last [n-1 | n]
 
     // Sequential context (Stage 9)
@@ -55,7 +58,7 @@ struct MemoryView
     bool chain = false;        // Cue Source = Echo Chain
 
 private:
-    bool blend (FeatureVector& out, bool contextHalf) const noexcept
+    bool blend (SetVector& out, bool contextHalf) const noexcept
     {
         out.fill (0.0f);
         double total = 0.0;
@@ -66,39 +69,55 @@ private:
                 continue;
             total += a < 0.0f ? -a : a;
             const int8_t* t = contextHalf ? contextThumb (i) : thumb (i);
-            for (int j = 0; j < kFeatureSize; ++j)
+            for (int j = 0; j < kSetSize; ++j)
                 out[static_cast<size_t> (j)] += a * static_cast<float> (t[j]);
         }
         if (total <= 0.0)
             return false;
-        double mean = 0.0, sq = 0.0;
-        for (float v : out)
-            mean += v;
-        mean /= kFeatureSize;
-        for (float v : out)
-            sq += (v - mean) * (v - mean);
-        const double sd = std::sqrt (sq / kFeatureSize);
-        for (auto& v : out)
-            v = sd > 0.0 ? static_cast<float> ((v - mean) / sd) : 0.0f;
+        // Scaled to unit RMS over the encoded cells; no mean is taken out,
+        // so unencoded (0) cells stay 0 (the pitch sets are mostly zeros).
+        const int n = setCells (shownSet);
+        double sq = 0.0;
+        int encoded = 0;
+        for (int j = 0; j < n; ++j)
+            if (const float v = out[static_cast<size_t> (j)]; v != 0.0f)
+            {
+                sq += static_cast<double> (v) * v;
+                ++encoded;
+            }
+        const double rms = encoded > 0 ? std::sqrt (sq / encoded) : 0.0;
+        for (int j = 0; j < n; ++j)
+        {
+            auto& v = out[static_cast<size_t> (j)];
+            v = rms > 0.0 ? static_cast<float> (v / rms) : 0.0f;
+        }
         return true;
     }
 
 public:
     const int8_t* thumb (int row) const noexcept
     {
-        return thumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kFeatureSize;
+        return thumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kSetSize;
     }
     // The echo's content (MINERVA's echo): the activation-weighted mean of
     // the rows' addresses, re-normalised. False if nothing is active.
     // Computed by the reader, off the audio thread.
-    bool echoContent (FeatureVector& out) const noexcept { return blend (out, false); }
+    bool echoContent (SetVector& out) const noexcept { return blend (out, false); }
 
     // The echo's context half: the weighted mean of the answering traces' n-1 halves.
-    bool echoContextContent (FeatureVector& out) const noexcept { return blend (out, true); }
+    bool echoContextContent (SetVector& out) const noexcept { return blend (out, true); }
+
+    // One set of an address (e.g. `heard`) as the thumbs show it.
+    SetVector shown (const FeatureVector& f) const noexcept
+    {
+        SetVector out {};
+        std::copy (f.begin() + setOffset (shownSet), f.begin() + setOffset (shownSet) + kSetSize, out.begin());
+        return out;
+    }
 
     const int8_t* contextThumb (int row) const noexcept
     {
-        return contextThumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kFeatureSize;
+        return contextThumbs.data() + static_cast<size_t> (rowSlot[static_cast<size_t> (row)]) * kSetSize;
     }
 
     // Changes whenever the row shows a different trace or its address changes.

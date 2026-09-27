@@ -1,0 +1,81 @@
+---
+title: "Addresses"
+subtitle: "What memory compares"
+---
+
+MINERVA recalls a trace when its **address** resembles the cue's. What the address describes therefore decides
+what counts as "the same": two bars with the same notes, the same sound or the same groove. Every trace stores
+five addresses, and the **Address** parameter (Main, Address, Retrieval and Sequence pages) chooses which one is
+compared.
+
+| Address | Describes | Layout | Alike when | Different when |
+|---|---|---|---|---|
+| **Spectrum** | brightness and envelope (the original address) | 16 time slots × 24 bands, 60 Hz – 16 kHz | the overall sound and loudness contour match | the sound changes a lot; neighbouring notes look almost the same |
+| **Pitch Class** | the notes, ignoring octave (chroma) | 32 time slots × 12 pitch classes | the same notes are played, in any octave | the notes differ |
+| **Pitch** | the notes, with register | 8 time slots × 48 semitones, C2 – B5 | the same notes in the same octave | the notes or their octave differ |
+| **Timbre** | the sound, not the note | 16 time slots × spectral shape and brightness | the same instrument or patch plays, whatever the note | the sound is brighter, darker or shaped differently |
+| **Rhythm** | where the attacks fall | 96 steps × onsets in 4 frequency ranges | attacks fall in the same places (kick, snare, hats separately) | the pattern differs, whatever the notes |
+
+All five are computed from the same audio when a trace is stored (and for imported audio), so you can switch at any
+time, even while playing, and memory answers differently straight away. Forgetting, encoding failure and merging
+apply to all of them.
+
+## Why it matters: a scale
+
+Play a synth into memory one note per bar, C D E F G A B C′ and back to C, and let the
+[echo chain](sequences.qmd#the-echo-chain) walk memory with Predict Next. Every note has a different successor, so a
+memory that can tell the notes apart plays the scale back.
+
+With the **Spectrum** address it doesn't: its 24 bands are about a third of an octave wide and every note has the
+same envelope, so neighbouring notes are 0.98 similar (C and D) and the walk drifts. The pitch sets tell them apart:
+
+| Similarity to C4 (a 2-bar sawtooth note) | D4 | E4 | G4 | C5 |
+|---|---|---|---|---|
+| Spectrum | 0.98 | 0.93 | 0.86 | 0.74 |
+| Pitch Class | 0.02 | 0.06 | 0.18 | 0.95 |
+| Pitch | 0.00 | 0.00 | 0.10 | 0.29 |
+| Timbre | 0.87 | 1.00 | 0.95 | 0.99 |
+
+With **Pitch Class** or **Pitch** the chain plays the scale. Pitch Class hears C′ as C, so after C′ it sometimes
+continues with D (what followed C); Pitch knows the octave. Hear the three walks in the
+[listening examples](../listening.qmd#38_scale_walk_spectrum) (38–40).
+
+## Mixing addresses
+
+With **Address = Custom**, the similarity is the weighted mean of each set's similarity, using the five weights on the
+Address page (a weight of 0 leaves a set out; all 0 means Spectrum). For example, Pitch Class 1 and Timbre 0.5
+recalls the same notes, preferring the same sound. The weights can be automated to morph between them.
+
+The memory matrix and side panel show the set being compared; with a Custom mix, the most weighted one.
+
+![Address = Pitch Class (preset 25 Scale Walker): each row is [n−1 | n], each half 32 time slots × 12 pitch classes. Only the pitch classes that sound are encoded; the rest are dark (0).](../images/screenshot-address.png){fig-alt="The plug-in window with the Pitch Class address: sparse bright marks on a dark matrix."}
+
+## How each address is made
+
+- **Spectrum**: band-pass filters (24 bands, 60 Hz – 16 kHz), energy per time slot in decibels, standardised within
+  the trace (mean 0, standard deviation 1), so level doesn't matter.
+- **Pitch Class and Pitch**: a short-time spectrum (~85 ms frames, 75 % overlap, restarted at each segment); its
+  peaks are located precisely and assigned to semitones. Only semitones within 20 dB of the loudest count; the rest
+  are 0, MINERVA's "not encoded", so notes that share no partials really are unlike. Pitch covers C2 – B5: lower
+  partials fold up by octaves, higher ones are left out. Segments shorter than about 50 ms have no pitch sets.
+- **Timbre**: the band spectrum is aligned to its first peak (a harmonic sound's fundamental), so a transposed
+  sound keeps its shape. Per slot: 8 cepstral coefficients (the spectrum's shape) and the spectral centroid above
+  the fundamental, place-coded as a bump (brightness). A bright and a dark saw on the same note are about 0.5
+  similar; the same saw on different notes 0.87 – 1.
+- **Rhythm**: the rise in level (onset strength) at 96 steps across the segment, in four frequency ranges (lows,
+  low mids, high mids, highs).
+
+**Features** (Continuous or Ternary) applies to every set. **Feature Focus** narrows the Spectrum set only.
+**Rolling** cueing always uses the Spectrum (it searches frame by frame inside traces).
+
+::: {.callout-note}
+## Memory files
+Saved memory holds every set. Memory saved by earlier versions loads with the new sets computed from its audio (the
+Spectrum keeps what was saved, forgetting included), and older versions can still read new files, which ignore the
+extra sets.
+:::
+
+## Presets
+
+**25 Scale Walker** (Dreaming Sequencer with Pitch Class), **26 Melody Memory** (Pitch, Predict Next),
+**27 Same Sound** (Timbre) and **28 Groove Recall** (Rhythm).

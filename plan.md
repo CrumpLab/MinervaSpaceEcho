@@ -734,6 +734,46 @@ model to the serial reaction-time task: Anticipating from experience.
 *Quarterly Journal of Experimental Psychology, 62*(9), 1757–1783. Elman, J. L.
 (1990). Finding structure in time. *Cognitive Science, 14*(2), 179–211.
 
+### Stage 10: Address sets
+
+Goal: vary what MINERVA compares. With the one spectral address, neighbouring
+notes look almost alike (C–D similarity 0.98), so a chain can't follow a
+melody; a pitch address can.
+
+- Every trace (and its context) stores five 384-value sets: Spectrum (the
+  original), Pitch Class (12 × 32 slots), Pitch (48 semitones C2–B5 × 8),
+  Timbre (aligned cepstrum + place-coded brightness × 16), Rhythm (onsets in
+  4 ranges × 96 steps). All computed at write time, so switching is instant.
+- **Address** (Spectrum / Pitch Class / Pitch / Timbre / Rhythm / Custom) and
+  five weights; similarity is the weighted mean of the sets' similarities, one
+  set exactly that set's. Novelty, merging, progressive (mapped onto each
+  set's slots) and Match Both use the same weights; Rolling stays spectral.
+- Memory files: `features` stays the Spectrum set; `sets` / `context_sets`
+  hold the rest. Missing sets are computed from the audio on load.
+- UI: the matrix and side panel draw the most weighted set in its own
+  layout; an Address page. Presets 25–28, examples 38–42, a scale test signal.
+
+- **Status:** implemented (version 0.4.0); awaiting a listen in Live.
+  - Spectrum-only output is bit-identical to 0.3.0 (all factory presets and
+    earlier examples). The new sets draw on a separate random stream so cue
+    noise and forgetting of the Spectrum are unchanged.
+  - Pitch sets: peak-picked, interpolated partials assigned to semitones;
+    presence-coded (within 20 dB of the loudest; others 0 = unencoded).
+    z-scoring made absent semitones share a noise floor (C–D 0.39–0.74);
+    folding partials above B5 into the top octave made all notes alike, so
+    they are left out. The FFT restarts at each segment, so live, imported
+    and reloaded addresses agree.
+  - Timbre: a plain cepstrum of the 24 bands leaked pitch (the empty bands
+    below the fundamental read as tilt), and z-scoring made any two tilts
+    alike; aligning to the first spectral peak and adding a place-coded
+    centroid gives bright vs dark saw 0.49, same saw on other notes 0.87–1.
+  - The scale test: with Pitch Class or Pitch a free chain plays the learned
+    scale (≥ 90 % of steps correct); with Spectrum it drifts.
+  - Echo Chain switched on while the input is silent now starts from the
+    playing echo (it used to wait for input forever).
+  - ~2 % more CPU for the extra analysis.
+  - The planned `mse-explore` report tool is deferred.
+
 ---
 
 ## 9. Decisions

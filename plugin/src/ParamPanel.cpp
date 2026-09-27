@@ -15,19 +15,21 @@ struct PageSpec
 const std::vector<PageSpec>& pageSpecs()
 {
     static const std::vector<PageSpec> specs {
-        { "Main", { "sync_mode", "trace_division", "trace_ms", "capacity", "power", "self_match", "cue_mode", "mode_selector",
-                    "blend_domain", "sequence_context", "freeze", "feedback", "echo_level_db", "dry_level_db" } },
+        { "Main", { "sync_mode", "trace_division", "trace_ms", "capacity", "power", "cue_mode", "mode_selector",
+                    "blend_domain", "sequence_context", "address", "freeze", "feedback", "echo_level_db", "dry_level_db" } },
         { "Memory", { "capacity", "memory_budget", "full_policy", "merge_threshold", "freeze", "write_mode", "write_gate_db",
                       "novelty_mode", "novelty_threshold", "write_probability", "record_source", "clamp_incoming",
                       "clamp_budget", "clamp_protects" } },
         { "Forgetting", { "encoding_failure", "content_dropout", "decay_forget", "decay_fade_db", "wear_tone" } },
-        { "Retrieval", { "power", "similarity", "feature_mode", "ternary_threshold", "self_match", "cue_gate_db",
+        { "Address", { "address", "spectrum_weight", "pitch_class_weight", "pitch_weight", "timbre_weight", "rhythm_weight",
+                       "feature_focus", "feature_mode", "ternary_threshold", "similarity", "power" } },
+        { "Retrieval", { "power", "similarity", "address", "feature_mode", "ternary_threshold", "self_match", "cue_gate_db",
                          "negative_mode", "normalization", "level_tracking", "recency", "feature_focus", "cue_noise",
                          "habituation" } },
         { "Cueing", { "cue_mode", "cue_source", "progressive_start", "rolling_window_ms", "rolling_interval_ms",
                       "lookahead_ms", "cue_smoothing_ms" } },
         { "Sequence", { "sequence_context", "context_cue", "context_weight", "cue_source", "chain_input", "chain_step",
-                        "cue_noise", "habituation", "power", "self_match", "playback", "cue_mode" } },
+                        "address", "cue_noise", "habituation", "power", "self_match", "playback", "cue_mode" } },
         { "Heads", { "mode_selector", "head1_level_db", "head1_pan", "head2_mode", "head2_level_db", "head2_pan", "head3_mode",
                      "head3_level_db", "head3_pan", "playback", "voices", "voice_spread", "voice_detune", "voice_delay_ms" } },
         { "Tape", { "length_mismatch", "wow", "flutter", "tape_drive", "hiss_db", "feedback_bass_db", "feedback_treble_db",
@@ -283,6 +285,13 @@ void ParamPanel::updateRelevance()
                            && value ("cue_source") != static_cast<int> (mse::CueSource::EchoChain);
             else if (id == "chain_input" || id == "chain_step")
                 relevant = value ("cue_source") == static_cast<int> (mse::CueSource::EchoChain);
+            else if (id.endsWith ("_weight") && id != "context_weight")
+                relevant = value ("address") == static_cast<int> (mse::AddressMode::Custom);
+            else if (id == "feature_focus")
+                // Focus applies to the Spectrum set.
+                relevant = value ("address") == static_cast<int> (mse::AddressMode::Spectrum)
+                           || (value ("address") == static_cast<int> (mse::AddressMode::Custom)
+                               && state.getRawParameterValue ("spectrum_weight")->load() > 0.0f);
             else if (id == "midi_channel" || id == "midi_base_note")
                 relevant = value ("midi_control") != 0;
             c->setAlpha (relevant ? 1.0f : 0.4f);

@@ -377,6 +377,21 @@ AudioBuffer styleChange (const Options& o)
     return b;
 }
 
+// A synth plays the C major scale, one note per bar (C D E F G A B C' and
+// back to C), then rests: memory holds a sequence in which every note has
+// a different successor (Stage 10's pitch addresses).
+AudioBuffer scale (const Options& o)
+{
+    auto b = makeBuffer (o);
+    const Timing tm (o);
+    constexpr std::array<int, 9> kNotes { 60, 62, 64, 65, 67, 69, 71, 72, 60 };
+    for (int bar = 0; bar < std::min (o.bars, static_cast<int> (kNotes.size())); ++bar)
+        sawVoice (b, tm.step16 (bar, 0), tm.spb - static_cast<int> (0.06 * tm.sr), kNotes[static_cast<size_t> (bar)], 0.8,
+                  tm.sr, 2600.0, 0.0, 0.005, 0.04, 1);
+    normalise (b);
+    return b;
+}
+
 AudioBuffer fullMix (const Options& o)
 {
     auto b = makeBuffer (o);
@@ -396,6 +411,7 @@ std::vector<Clip> generateAll (const Options& o)
         { "impulses",     "Single-sample clicks: 1.0 on downbeats, 0.5 on other beats", impulses (o) },
         { "style_change", "Style A (Am, 4/4 groove) then style B (Dm, half-time stabs) at the midpoint", styleChange (o) },
         { "full_mix",     "Drums + chords/bass + melody",                              fullMix (o) },
+        { "scale",        "C major scale, one synth note per bar (C to C' and back to C), then rests", scale (o) },
     };
 }
 

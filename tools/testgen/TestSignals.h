@@ -31,6 +31,7 @@ AudioBuffer melody (const Options& o);       // 1-bar motif with occasional vari
 AudioBuffer impulses (const Options& o);     // single-sample clicks on every beat
 AudioBuffer styleChange (const Options& o);  // style A for half, then style B
 AudioBuffer fullMix (const Options& o);      // drums + chords/bass + melody
+AudioBuffer scale (const Options& o);        // C major scale, a note per bar, then rests
 
 std::vector<Clip> generateAll (const Options& o);
 

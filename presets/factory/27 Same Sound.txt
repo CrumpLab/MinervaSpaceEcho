@@ -1,0 +1,7 @@
+# Address = Timbre: bars are recalled by what they sound like (bright or
+# dark, the shape of the spectrum), whatever notes they play.
+address = Timbre
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -6

@@ -43,8 +43,15 @@ DOCS = {
     "lookahead_ms": "Prediction: play memory this far ahead of the current position, so you hear what came next last time.",
     "cue_smoothing_ms": "Crossfade whenever a live cue (Progressive or Rolling) changes the echo.",
     "cue_source": "What cues memory: the **Input**, the **Sidechain** (another track routed to the plug-in's sidechain input), a **Random** address (memory dreams), **Frozen** (the last live cue, held), or **Echo Chain** (each echo cues the next; see [Sequences](../guide/sequences.qmd)).",
-    "feature_focus": "Compare **Full** addresses, **Rhythm** only (loudness over time) or **Timbre** only (average spectrum). Segment and Progressive cueing.",
+    "feature_focus": "Within the Spectrum set: compare it **Full**, **Rhythm** only (loudness over time) or **Timbre** only (average spectrum). Segment and Progressive cueing. The Address choice offers finer Rhythm and Timbre sets.",
     "recency": "Favour recently stored traces (0 = no preference).",
+    # address sets (Stage 10)
+    "address": "Which address memory compares (see [Addresses](../guide/addresses.qmd)): **Spectrum** (brightness and envelope, the original), **Pitch Class** (notes, octave-blind), **Pitch** (notes with register), **Timbre** (the sound, not the note), **Rhythm** (where the attacks fall), or **Custom** (a weighted mix, set with the weights below). Every trace stores all five, so you can switch at any time.",
+    "spectrum_weight": "Custom address: how much the Spectrum set counts.",
+    "pitch_class_weight": "Custom address: how much the Pitch Class set counts.",
+    "pitch_weight": "Custom address: how much the Pitch set counts.",
+    "timbre_weight": "Custom address: how much the Timbre set counts.",
+    "rhythm_weight": "Custom address: how much the Rhythm set counts. Similarity is the weighted mean of the sets' similarities; with every weight at 0 the Spectrum is used.",
     # sequential context
     "sequence_context": "Every trace also stores the previous segment's address, [n−1 | n]. On: cues use that context (Context Cue). Context is recorded either way, so you can switch it on later.",
     "context_cue": "**Match Both**: the last two segments against [n−1 | n] (sequence-sensitive recall). **Predict Next**: the last segment against traces' n−1 halves, so you hear what came next last time. **Current Only**: ordinary MINERVA II.",

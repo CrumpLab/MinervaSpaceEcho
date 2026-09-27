@@ -192,6 +192,7 @@ private:
     RetrievalSettings retrievalSettings() const noexcept;
     // Sets rs's context fields for a cue `now` (previous cue `before`) and
     // fills contextProbeCurrent / contextProbeContext.
+    void updateChainState() noexcept; // Echo Chain: the next cue, from the echo on head 1
     void applyContextCue (RetrievalSettings& rs, const FeatureVector& now, const FeatureVector& before) noexcept;
     void noteUse (const RetrievalResult& result) noexcept;
     // Installs weights[0..n) on a head, shaped by the playback mode.
@@ -229,6 +230,10 @@ private:
     void publishView() noexcept;
     void deleteTrace (int position) noexcept;
     float random01() noexcept;
+    // The same for features beyond the Spectrum set (Stage 10): a separate
+    // stream, so adding address sets left Spectrum-only renders unchanged.
+    float randomSets01() noexcept;
+    float randomFor (size_t featureIndex) noexcept { return featureIndex < kSetSize ? random01() : randomSets01(); }
 
     // non-real-time helpers
     static MemorySnapshot snapshotOf (const TraceStore& store);
@@ -242,6 +247,7 @@ private:
     int numChannels = 2;
     uint64_t seed_ = 1;
     uint64_t rngState = 1;
+    uint64_t setRngState = 0x5e75;
 
     // memory and its hand-over between threads
     std::unique_ptr<TraceStore> store;

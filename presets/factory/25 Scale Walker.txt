@@ -1,0 +1,14 @@
+# Dreaming Sequencer with Address = Pitch Class: memory compares notes, not
+# brightness, so the chain follows the melodies and chord moves it learned
+# (octave-blind: a note an octave up counts as the same note).
+sequence_context = on
+cue_source = Echo Chain
+chain_step = Sample
+playback = Sample
+chain_input = 0
+address = Pitch Class
+habituation = 0.4
+cue_noise = 0.15
+capacity = 100
+power = 6
+echo_level_db = -4

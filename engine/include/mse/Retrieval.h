@@ -9,7 +9,21 @@ namespace mse {
 // Similarity between a probe and a trace, clamped to [-1, 1].
 //  Hintzman: sum(p*t) / N, N = number of features non-zero in p or t (1986).
 //  Cosine:   sum(p*t) / (|p| |t|).
+// setSimilarity compares one address set (kSetSize values); similarity
+// compares the Spectrum set (the original address).
+float setSimilarity (const float* probe, const float* trace, Similarity kind) noexcept;
 float similarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind) noexcept;
+
+// Stage 10: the weighted mean of the address sets' similarities (sets with
+// weight 0 are skipped; a single set is exactly that set's similarity).
+// Feature focus applies to the Spectrum set.
+float addressSimilarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind,
+                         const AddressWeights& weights, FeatureFocus focus = FeatureFocus::Full) noexcept;
+
+// The weights with their largest entry (the set a view should show), and a
+// sanitised copy (negative -> 0; all 0 -> Spectrum).
+int dominantSet (const AddressWeights& weights) noexcept;
+AddressWeights sanitiseWeights (const AddressWeights& weights) noexcept;
 
 // sign(S) * |S|^power
 float activation (float s, float power) noexcept;
@@ -22,6 +36,7 @@ struct RetrievalSettings
     Normalization normalization = Normalization::Sum;
     int excludeSlot = -1;   // slot to ignore (self-match off), or -1
     FeatureFocus focus = FeatureFocus::Full;
+    AddressWeights address = kSpectrumOnly; // Stage 10: which address sets are compared
     float recency = 0.0f;   // 0..1: activation *= exp(-recency * age / 4), age in traces stored since
 
     // Sequential context (Stage 9). A trace's address is [context | features]
@@ -88,8 +103,19 @@ RetrievalResult finishRetrieval (const TraceStore& store, const RetrievalSetting
 // Similarity restricted to slots [slotBegin, slotEnd) (Progressive cue: the
 // part of the bar heard so far). With `renormalize`, the trace is re-scaled
 // over that range so a partial bar compares fairly with a whole one.
+// prefixSimilarity works on the Spectrum set.
 float prefixSimilarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind,
                         int slotBegin, int slotEnd, bool renormalize) noexcept;
+
+// The same over one set's values (layout: slots x width), slots [slotBegin, slotEnd).
+float setPrefixSimilarity (const float* probe, const float* trace, int width, Similarity kind,
+                           int slotBegin, int slotEnd, bool renormalize) noexcept;
+
+// Every weighted set over the same stretch of the segment: [slotBegin, slotEnd)
+// in 16ths (kSlots), mapped onto each set's own slots.
+float addressPrefixSimilarity (const FeatureVector& probe, const FeatureVector& trace, Similarity kind,
+                               const AddressWeights& weights, FeatureFocus focus, int slotBegin, int slotEnd,
+                               bool renormalize) noexcept;
 
 // ---- Rolling cue (unclocked search over frame tracks) ----
 
@@ -117,7 +143,7 @@ struct OffsetMatch
 OffsetMatch bestOffset (const WindowProbe& probe, const TraceSlot& trace, int minContinuation) noexcept;
 
 // The echo's own address (MINERVA's echo content): activation-weighted mean
-// of the retrieved traces' features, re-normalised (or re-ternarised). Used to
+// of the retrieved traces' features, re-normalised (or re-ternarised) set by set. Used to
 // cue iterative heads with the previous echo.
 void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
                    float ternaryThreshold, FeatureVector& out, bool contextHalf = false) noexcept;
@@ -130,6 +156,6 @@ struct BestMatch
 
 // The stored trace most similar to `probe` (optionally ignoring clamped ones).
 BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Similarity kind,
-                     bool unclampedOnly) noexcept;
+                     bool unclampedOnly, const AddressWeights& weights = kSpectrumOnly) noexcept;
 
 } // namespace mse

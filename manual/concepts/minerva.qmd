@@ -27,6 +27,10 @@ it was. Slots that received no audio are 0: in MINERVA, 0 means "not encoded".
 Optionally the address can be **ternary** (−1, 0, +1), as in Hintzman's original simulations, with
 **Ternary Threshold** deciding how far from average a value must be to count.
 
+This spectrogram is the **Spectrum** address. Every trace also stores four other addresses, describing its notes
+(**Pitch Class**, **Pitch**), its sound (**Timbre**) and its attacks (**Rhythm**); the **Address** parameter decides
+which one MINERVA compares, or a weighted mix of them. See [Addresses](../guide/addresses.qmd).
+
 ## Similarity
 
 When a segment ends, it becomes the probe *P* and is compared with every stored trace *T*:

@@ -19,9 +19,10 @@ add_executable(mse_tests
     ControlTests.cpp
     EdgeTests.cpp
     SequenceTests.cpp
+    AddressTests.cpp
 )
 target_compile_definitions(mse_tests PRIVATE MSE_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
-target_link_libraries(mse_tests PRIVATE mse_tools_common Catch2::Catch2WithMain)
+target_link_libraries(mse_tests PRIVATE mse_tools_common nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)

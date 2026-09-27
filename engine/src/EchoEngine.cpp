@@ -53,6 +53,11 @@ float EchoEngine::random01() noexcept
     return static_cast<float> (splitmix (rngState) >> 40) * (1.0f / 16777216.0f);
 }
 
+float EchoEngine::randomSets01() noexcept
+{
+    return static_cast<float> (splitmix (setRngState) >> 40) * (1.0f / 16777216.0f);
+}
+
 EchoEngine::EchoEngine()
 {
     retired.reserve (8);
@@ -145,6 +150,7 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
 
     outSmoothing = std::exp (-1.0f / (0.02f * static_cast<float> (sampleRate)));
     rngState = seed_;
+    setRngState = seed_ ^ 0x5e75a11d5e75ull;
     segmentCount = static_cast<uint64_t> (store->size());
     resetPlayback();
 }
@@ -369,8 +375,8 @@ void EchoEngine::enableMemoryView()
         const size_t slots = kMaxCapacity + TraceStore::kSpares;
         b->rows.resize (kMaxCapacity);
         b->rowSlot.assign (kMaxCapacity, 0);
-        b->thumbs.assign (slots * kFeatureSize, 0);
-        b->contextThumbs.assign (slots * kFeatureSize, 0);
+        b->thumbs.assign (slots * kSetSize, 0);
+        b->contextThumbs.assign (slots * kSetSize, 0);
         b->thumbKeys.assign (slots, ~uint64_t { 0 });
     }
     viewActivation.assign (kMaxCapacity + TraceStore::kSpares, 0.0f);
@@ -1256,12 +1262,12 @@ void EchoEngine::applyDecay() noexcept
         s.strength *= fade;
         if (params.decayForget > 0.0f)
         {
-            for (auto& f : s.features)
-                if (f != 0.0f && random01() < params.decayForget)
-                    f = 0.0f;
-            for (auto& f : s.context)
-                if (f != 0.0f && random01() < params.decayForget)
-                    f = 0.0f;
+            for (size_t j = 0; j < s.features.size(); ++j)
+                if (s.features[j] != 0.0f && randomFor (j) < params.decayForget)
+                    s.features[j] = 0.0f;
+            for (size_t j = 0; j < s.context.size(); ++j)
+                if (s.context[j] != 0.0f && randomFor (j) < params.decayForget)
+                    s.context[j] = 0.0f;
             ++s.featureVersion;
         }
         if (s.strength < kDeadStrength)
@@ -1287,7 +1293,8 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, c
             return WriteOutcome::Gated;
         if (params.noveltyMode != NoveltyMode::Off && store->size() > 0)
         {
-            const bool familiar = bestMatch (feats, *store, params.similarity, false).similarity >= params.noveltyThreshold;
+            const bool familiar = bestMatch (feats, *store, params.similarity, false, effectiveAddressWeights (params)).similarity
+                                  >= params.noveltyThreshold;
             if ((params.noveltyMode == NoveltyMode::StoreNovel) == familiar)
                 return WriteOutcome::Gated;
         }
@@ -1313,12 +1320,12 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, c
     spare.context = context; // the previous segment's address (Stage 9)
     if (params.encodingFailure > 0.0f)
     {
-        for (auto& f : spare.features)
-            if (random01() < params.encodingFailure)
-                f = 0.0f;
-        for (auto& f : spare.context)
-            if (f != 0.0f && random01() < params.encodingFailure)
-                f = 0.0f;
+        for (size_t j = 0; j < spare.features.size(); ++j)
+            if (randomFor (j) < params.encodingFailure)
+                spare.features[j] = 0.0f;
+        for (size_t j = 0; j < spare.context.size(); ++j)
+            if (spare.context[j] != 0.0f && randomFor (j) < params.encodingFailure)
+                spare.context[j] = 0.0f;
     }
     if (params.contentDropout > 0.0f)
         applyDropouts (spare);
@@ -1327,7 +1334,7 @@ WriteOutcome EchoEngine::writeTrace (int spareIdx, const FeatureExtractor& fx, c
     const bool mergeWhenFull = store->full() && params.fullPolicy == FullPolicy::MergeSimilar;
     if ((params.mergeThreshold < 1.0f || mergeWhenFull) && store->size() > 0)
     {
-        const auto best = bestMatch (feats, *store, params.similarity, true);
+        const auto best = bestMatch (feats, *store, params.similarity, true, effectiveAddressWeights (params));
         if (best.position >= 0 && (mergeWhenFull || best.similarity >= params.mergeThreshold))
         {
             const int target = store->storedSlot (best.position);
@@ -1417,7 +1424,10 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
 
             // Echo Chain (Stage 9): the last echo's content cues memory, blended
             // with the live input by Chain Input; without an echo it restarts
-            // from the input.
+            // from the input. Switched on while the input is silent, it
+            // starts from the echo that is playing.
+            if (params.cueSource == CueSource::EchoChain && ! chainValid && gated)
+                updateChainState();
             const bool chaining = params.cueSource == CueSource::EchoChain && chainValid;
             if (chaining)
             {
@@ -1441,20 +1451,7 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
             if (! held)
                 updateHabituation();
 
-            // The chain's next step: what memory expects next, either the
-            // blend of every answering trace or one of them, drawn by
-            // activation (a random walk through memory).
-            chainValid = params.cueSource == CueSource::EchoChain && headWeightCount[0] > 0;
-            if (chainValid && params.chainStep == ChainStep::Sample)
-            {
-                const int pick = sampleChainTrace();
-                chainValid = pick >= 0;
-                if (chainValid)
-                    chainState = store->slot (pick).features;
-            }
-            else if (chainValid)
-                echoAddress (headWeights[0].data(), headWeightCount[0], *store, params.featureMode,
-                             params.ternaryThreshold, chainState);
+            updateChainState();
         }
         // Context for the next segment's trace, and what the view shows as [n-1 | n].
         heardBefore = prevHeard;
@@ -1501,7 +1498,7 @@ void EchoEngine::addCueNoise (FeatureVector& cueVec) noexcept
         return;
     for (size_t j = 0; j < cueVec.size(); j += 2)
     {
-        const float u1 = std::max (1.0e-7f, random01()), u2 = random01();
+        const float u1 = std::max (1.0e-7f, randomFor (j)), u2 = randomFor (j);
         const float r = params.cueNoise * std::sqrt (-2.0f * std::log (u1));
         const float z0 = r * std::cos (6.2831853f * u2), z1 = r * std::sin (6.2831853f * u2);
         if (cueVec[j] != 0.0f)
@@ -1531,6 +1528,24 @@ void EchoEngine::updateHabituation() noexcept
         auto& f = store->slot (e.slot).fatigue;
         f = std::min (0.95f, f + params.habituation * std::abs (e.weight) / maxW);
     }
+}
+
+void EchoEngine::updateChainState() noexcept
+{
+    // The chain's next step: what memory expects next, either the blend of
+    // every answering trace or one of them, drawn by activation (a random
+    // walk through memory).
+    chainValid = params.cueSource == CueSource::EchoChain && headWeightCount[0] > 0;
+    if (chainValid && params.chainStep == ChainStep::Sample)
+    {
+        const int pick = sampleChainTrace();
+        chainValid = pick >= 0;
+        if (chainValid)
+            chainState = store->slot (pick).features;
+    }
+    else if (chainValid)
+        echoAddress (headWeights[0].data(), headWeightCount[0], *store, params.featureMode, params.ternaryThreshold,
+                     chainState);
 }
 
 int EchoEngine::sampleChainTrace() noexcept
@@ -1591,6 +1606,7 @@ RetrievalSettings EchoEngine::retrievalSettings() const noexcept
     rs.negativeMode = params.negativeMode;
     rs.normalization = params.normalization;
     rs.focus = params.featureFocus;
+    rs.address = effectiveAddressWeights (params);
     rs.recency = params.recency;
     rs.habituation = params.habituation > 0.0f;
     return rs;
@@ -1869,13 +1885,16 @@ bool EchoEngine::makeCue (FeatureVector& out, float& cueRms, int64_t recorded) n
     switch (params.cueSource)
     {
         case CueSource::Random:
-            // Dreaming: a random address.
-            for (auto& f : out)
-            {
-                const float r = random01() * 2.0f - 1.0f;
-                f = params.featureMode == FeatureMode::Ternary ? (r > 0.33f ? 1.0f : (r < -0.33f ? -1.0f : 0.0f))
-                                                               : r * 1.7f;
-            }
+            // Dreaming: a random address (in every set's used cells).
+            out.fill (0.0f);
+            for (int set = 0; set < kNumSets; ++set)
+                for (int j = 0; j < setCells (set); ++j)
+                {
+                    const auto k = static_cast<size_t> (setOffset (set) + j);
+                    const float r = randomFor (k) * 2.0f - 1.0f;
+                    out[k] = params.featureMode == FeatureMode::Ternary ? (r > 0.33f ? 1.0f : (r < -0.33f ? -1.0f : 0.0f))
+                                                                        : r * 1.7f;
+                }
             cueRms = -1.0f;
             return false;
         case CueSource::Frozen:
@@ -1926,6 +1945,11 @@ void EchoEngine::progressiveUpdate (int k) noexcept
 
     const int firstSlot = static_cast<int> (static_cast<double> (segBegin) * kSlots / std::max (1.0, segNominal));
     const bool renormalize = params.featureMode == FeatureMode::Continuous;
+    const auto address = effectiveAddressWeights (params);
+    auto partial = [&] (const FeatureVector& f) {
+        return addressPrefixSimilarity (partialProbe, f, params.similarity, address, params.featureFocus, firstSlot, k,
+                                        renormalize);
+    };
     int n = 0;
     for (int i = 0; i < store->size(); ++i)
     {
@@ -1933,22 +1957,14 @@ void EchoEngine::progressiveUpdate (int k) noexcept
         const auto& t = store->slot (slot);
         float sim;
         if (! params.sequenceContext || params.contextCue == ContextCue::CurrentOnly)
-            sim = focusedSimilarity (partialProbe, t.features, params.similarity, params.featureFocus, firstSlot, k,
-                                     renormalize);
+            sim = partial (t.features);
         else if (params.contextCue == ContextCue::PredictNext)
             // The bar so far against the same stretch of each trace's n-1 half.
-            sim = focusedSimilarity (partialProbe, t.context, params.similarity, params.featureFocus, firstSlot, k,
-                                     renormalize);
+            sim = partial (t.context);
         else
             // Match Both: the whole previous bar against n-1, the bar so far against n.
-            sim = combineHalves (params.featureFocus == FeatureFocus::Full
-                                     ? similarity (prevHeard, t.context, params.similarity)
-                                     : focusedSimilarity (prevHeard, t.context, params.similarity, params.featureFocus,
-                                                          0, kSlots, false),
-                                 params.contextWeight,
-                                 focusedSimilarity (partialProbe, t.features, params.similarity, params.featureFocus,
-                                                    firstSlot, k, renormalize),
-                                 1.0f);
+            sim = combineHalves (addressSimilarity (prevHeard, t.context, params.similarity, address, params.featureFocus),
+                                 params.contextWeight, partial (t.features), 1.0f);
         weights[static_cast<size_t> (n++)] = { slot, sim, 0.0f, 0 };
     }
     const auto result = finishRetrieval (*store, retrievalSettings(), weights.data(), n);
@@ -2604,6 +2620,8 @@ void EchoEngine::publishView() noexcept
     }
 
     const int n = std::min (store->size(), static_cast<int> (v.rows.size()));
+    const int shownSet = dominantSet (effectiveAddressWeights (params));
+    v.shownSet = shownSet;
     const uint64_t now = store->currentSerial();
     const double sr = store->sampleRate();
     for (int i = 0; i < n; ++i)
@@ -2625,19 +2643,21 @@ void EchoEngine::publishView() noexcept
         r.clamped = s.clamped;
 
         v.rowSlot[static_cast<size_t> (i)] = slot;
-        const uint64_t key = (s.serial << 20) ^ s.featureVersion ^ (static_cast<uint64_t> (viewStoreEpoch) << 58);
+        const uint64_t key = (s.serial << 20) ^ s.featureVersion ^ (static_cast<uint64_t> (viewStoreEpoch) << 58)
+                             ^ (static_cast<uint64_t> (shownSet + 1) << 52);
         if (slot < slots && v.thumbKeys[static_cast<size_t> (slot)] != key)
         {
             v.thumbKeys[static_cast<size_t> (slot)] = key;
-            auto quantise = [] (const FeatureVector& f, int8_t* t) {
-                for (int j = 0; j < kFeatureSize; ++j)
+            auto quantise = [shownSet] (const FeatureVector& f, int8_t* t) {
+                const float* src = f.data() + setOffset (shownSet);
+                for (int j = 0; j < kSetSize; ++j)
                 {
-                    const float q = std::clamp (f[static_cast<size_t> (j)] * MemoryView::kThumbScale, -127.0f, 127.0f);
+                    const float q = std::clamp (src[j] * MemoryView::kThumbScale, -127.0f, 127.0f);
                     t[j] = static_cast<int8_t> (q >= 0.0f ? q + 0.5f : q - 0.5f);
                 }
             };
-            quantise (s.features, v.thumbs.data() + static_cast<size_t> (slot) * kFeatureSize);
-            quantise (s.context, v.contextThumbs.data() + static_cast<size_t> (slot) * kFeatureSize);
+            quantise (s.features, v.thumbs.data() + static_cast<size_t> (slot) * kSetSize);
+            quantise (s.context, v.contextThumbs.data() + static_cast<size_t> (slot) * kSetSize);
         }
     }
     v.count = n;

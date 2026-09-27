@@ -8,8 +8,10 @@
 
 // Draws a trace address (16 time slots x 24 bands) as a small spectrogram:
 // time left to right, low bands at the bottom.
-void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const float* values);
-void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const int8_t* quantised);
+// Draws one address set (`set`: mse::AddressSet index) in its own layout.
+void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const float* values, int set);
+void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const int8_t* quantised, int set);
+juce::String addressLayoutText (int set);
 
 // The memory matrix (plan Stage 7): one row per memory slot, oldest at the
 // top. Each row shows the trace's lock, its activation in the last retrieval,
@@ -49,7 +51,8 @@ private:
     std::vector<mse::TraceView> rows;
     int count = 0, capacity = 1, clampLimit = 0;
     float maxAct = 0.0f, maxPlay = 0.0f;
-    juce::Image heat;                 // kFeatureSize x capacity
+    juce::Image heat;                 // kSetSize (x2 with sequence context) x rows
+    int shownSet = 0;                 // the address set the rows show
     std::vector<uint64_t> heatKeys;
     uint64_t selected = 0;
     int hoverRow = -1;
@@ -81,12 +84,13 @@ private:
     juce::TextButton auditionButton { "Audition" }, pairButton { "n-1 | n" };
     juce::ToggleButton loopToggle { "Loop" };
     void updateAuditionButtons();
-    mse::FeatureVector heard {}, echo {}, heardBefore {}, echoContext {};
+    mse::SetVector heard {}, echo {}, heardBefore {}, echoContext {};
+    int shownSet = 0;
     bool hasEcho = false, sequence = false, predicting = false;
     float intensity = 0.0f, maxActivation = 0.0f, intensityShown = 0.0f;
     bool hasSelection = false;
     mse::TraceView sel;
-    std::array<int8_t, mse::kFeatureSize> selThumb {}, selContextThumb {};
+    std::array<int8_t, mse::kSetSize> selThumb {}, selContextThumb {};
     juce::TextButton lockButton { "Clamp" }, deleteButton { "Delete" };
     juce::Rectangle<int> heardArea, echoArea, meterArea, selArea;
 };

@@ -37,7 +37,9 @@ current position, so you hear what came *next* last time.
 
 ## Shaping the match
 
-- **Feature Focus** compares the **Full** address, **Rhythm** only (loudness over time) or **Timbre** only
+- **Address** chooses what is compared: the spectrum, the notes, the sound or the attacks. See
+  [Addresses](addresses.qmd).
+- **Feature Focus** compares the Spectrum address **Full**, **Rhythm** only (loudness over time) or **Timbre** only
   (the average spectrum). With Rhythm, a new style with the same pulse recalls the old one.
 - **Recency** favours recently stored traces.
 - **Self Match** decides whether the segment just played may answer itself.

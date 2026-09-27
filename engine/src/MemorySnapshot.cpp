@@ -1,5 +1,7 @@
 #include "mse/MemorySnapshot.h"
 
+#include "mse/Features.h"
+#include "mse/Params.h"
 #include "mse/Wav.h"
 
 #include <algorithm>
@@ -28,6 +30,26 @@ std::string traceFileName (size_t index)
     return buf;
 }
 
+// Address sets are saved under these keys (the Spectrum set is "features").
+const char* setKey (int set)
+{
+    static const char* const keys[kNumSets] = { "spectrum", "pitch_class", "pitch", "timbre", "rhythm" };
+    return keys[set];
+}
+
+std::vector<float> setValues (const FeatureVector& f, int set)
+{
+    return { f.begin() + setOffset (set), f.begin() + setOffset (set) + kSetSize };
+}
+
+void readSet (const json& values, FeatureVector& f, int set, const char* what)
+{
+    const auto v = values.get<std::vector<float>>();
+    if (v.size() != static_cast<size_t> (kSetSize))
+        throw std::runtime_error (std::string ("trace ") + what + " has the wrong size");
+    std::copy (v.begin(), v.end(), f.begin() + setOffset (set));
+}
+
 json traceMeta (const TraceRecord& t)
 {
     json j {
@@ -41,11 +63,21 @@ json traceMeta (const TraceRecord& t)
         { "generation", t.generation },
         { "merge_count", t.mergeCount },
         { "clamped", t.clamped },
-        { "features", std::vector<float> (t.features.begin(), t.features.end()) },
+        { "features", setValues (t.features, 0) }, // the Spectrum set (the original address)
     };
+    json sets = json::object();
+    for (int s = 1; s < kNumSets; ++s)
+        sets[setKey (s)] = setValues (t.features, s);
+    j["sets"] = std::move (sets);
     // Sequential context (optional; older files have none).
     if (std::any_of (t.context.begin(), t.context.end(), [] (float v) { return v != 0.0f; }))
-        j["context"] = std::vector<float> (t.context.begin(), t.context.end());
+    {
+        j["context"] = setValues (t.context, 0);
+        json cs = json::object();
+        for (int s = 1; s < kNumSets; ++s)
+            cs[setKey (s)] = setValues (t.context, s);
+        j["context_sets"] = std::move (cs);
+    }
     return j;
 }
 
@@ -60,17 +92,24 @@ void readTraceMeta (const json& j, TraceRecord& t)
     t.generation = j.value ("generation", 0);
     t.mergeCount = std::max (1, j.value ("merge_count", 1));
     t.clamped = j.value ("clamped", false);
-    const auto f = j.at ("features").get<std::vector<float>>();
-    if (f.size() != t.features.size())
-        throw std::runtime_error ("trace features have the wrong size");
-    std::copy (f.begin(), f.end(), t.features.begin());
+    t.features.fill (0.0f);
     t.context.fill (0.0f);
+    readSet (j.at ("features"), t.features, 0, "features");
     if (j.contains ("context"))
+        readSet (j.at ("context"), t.context, 0, "context");
+    t.hasSets = j.contains ("sets");
+    if (t.hasSets)
     {
-        const auto c = j.at ("context").get<std::vector<float>>();
-        if (c.size() != t.context.size())
-            throw std::runtime_error ("trace context has the wrong size");
-        std::copy (c.begin(), c.end(), t.context.begin());
+        const auto& sets = j.at ("sets");
+        const json none = json::object();
+        const auto& csets = j.contains ("context_sets") ? j.at ("context_sets") : none;
+        for (int s = 1; s < kNumSets; ++s)
+        {
+            if (sets.contains (setKey (s)))
+                readSet (sets.at (setKey (s)), t.features, s, setKey (s));
+            if (csets.contains (setKey (s)))
+                readSet (csets.at (setKey (s)), t.context, s, setKey (s));
+        }
     }
 }
 
@@ -169,6 +208,7 @@ MemorySnapshot readMemoryFolder (const std::string& dir)
             throw std::runtime_error (file + " has a different sample rate from the manifest");
         s.traces[i].audio = std::move (b.channels);
     }
+    completeAddressSets (s);
     return s;
 }
 
@@ -236,7 +276,50 @@ MemorySnapshot deserializeMemory (const uint8_t* data, size_t size)
             pos += bytes;
         }
     }
+    completeAddressSets (s);
     return s;
+}
+
+void completeAddressSets (MemorySnapshot& s)
+{
+    FeatureSettings settings;
+    for (const auto& [id, value] : s.params)
+    {
+        if (id == "feature_mode")
+            settings.mode = value >= 0.5f ? FeatureMode::Ternary : FeatureMode::Continuous;
+        else if (id == "ternary_threshold")
+            settings.ternaryThreshold = value;
+    }
+
+    FeatureExtractor fx;
+    std::vector<float> mono;
+    for (size_t i = 0; i < s.traces.size(); ++i)
+    {
+        auto& t = s.traces[i];
+        if (t.hasSets)
+            continue;
+        fx.prepare (s.sampleRate); // each trace on its own, as import does
+        const auto n = static_cast<size_t> (t.length());
+        mono.assign (n, 0.0f);
+        for (const auto& ch : t.audio)
+            for (size_t k = 0; k < n; ++k)
+                mono[k] += ch[k] / static_cast<float> (t.audio.size());
+        const double nominal = t.nominalLength > 0.0 ? t.nominalLength : static_cast<double> (t.begin + t.length());
+        fx.beginSegment (nominal);
+        if (n > 0)
+            fx.push (mono.data(), static_cast<int> (n), t.begin);
+        FeatureVector computed {};
+        fx.finalize (computed, settings);
+        std::copy (computed.begin() + setOffset (1), computed.end(), t.features.begin() + setOffset (1));
+
+        const bool hasContext = std::any_of (t.context.begin(), t.context.begin() + kSetSize, [] (float v) { return v != 0.0f; });
+        if (hasContext && i > 0)
+        {
+            const auto& prev = s.traces[i - 1].features;
+            std::copy (prev.begin() + setOffset (1), prev.end(), t.context.begin() + setOffset (1));
+        }
+        t.hasSets = true;
+    }
 }
 
 // ---- resampling -------------------------------------------------------------------

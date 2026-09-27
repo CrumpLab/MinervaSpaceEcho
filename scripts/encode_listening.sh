@@ -13,4 +13,5 @@ for wav in "$RENDERS"/*.wav; do
 done
 enc "$RENDERS/input/style_change_120bpm.wav" "$OUT/input_style_change.mp3"
 enc "$RENDERS/input/drums_120bpm.wav" "$OUT/input_drums.mp3"
+enc "$RENDERS/input/scale_120bpm.wav" "$OUT/input_scale.mp3"
 echo "encoded $(ls "$OUT"/*.mp3 | wc -l) files into $OUT"

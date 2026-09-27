@@ -58,8 +58,9 @@ time.
   units mix the previous state with the new input.
 - **1**: the same as Predict Next from the input.
 
-The chain starts from the last segment you played. If memory stops answering (it's empty, or nothing is similar),
-it restarts from the input. Hold MIDI note *base + 8* to switch to the chain while the note is down.
+The chain starts from the last segment you played; switched on after you stop playing, it starts from the echo
+that is playing. If memory stops answering (it's empty, or nothing is similar), it restarts from the input. Hold
+MIDI note *base + 8* to switch to the chain while the note is down.
 
 ### How each step is chosen
 
@@ -75,6 +76,10 @@ it restarts from the input. Hold MIDI note *base + 8* to switch to the chain whi
 **Activation Power** acts like a temperature: high values make the walk follow the most expected continuation, low
 values let weaker continuations through.
 
+A walk can only follow transitions memory can tell apart. With the default **Spectrum** address, neighbouring notes
+of a melody look almost alike, so the walk drifts between similar-sounding segments; with **Address = Pitch Class**
+or **Pitch** it follows the notes ([Addresses](addresses.qmd)).
+
 ### Getting out of ruts
 
 Music with repeated bars teaches memory that "the next bar is like this one", so a walk can keep returning to the
@@ -89,9 +94,10 @@ same place. Two controls help:
 
 ## Try it
 
-- **22 Anticipate** (Predict Next), **23 Sequence Memory** (Match Both) and **24 Dreaming Sequencer**
-  (Echo Chain with sampled steps, habituation and a little cue noise) in the preset menu.
-- The listening examples **34** to **37**.
+- **22 Anticipate** (Predict Next), **23 Sequence Memory** (Match Both), **24 Dreaming Sequencer**
+  (Echo Chain with sampled steps, habituation and a little cue noise) and **25 Scale Walker** (the same with
+  Address = Pitch Class) in the preset menu.
+- The listening examples **34** to **40** (38 – 40: a scale walked with the Spectrum, Pitch Class and Pitch addresses).
 
 ## References
 

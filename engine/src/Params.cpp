@@ -20,6 +20,7 @@ const char* const kContextCueChoices[] = { "Match Both", "Predict Next", "Curren
 const char* const kChainStepChoices[] = { "Blend", "Sample" };
 const char* const kRunChoices[] = { "Paused", "Running" };
 const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
+const char* const kAddressChoices[] = { "Spectrum", "Pitch Class", "Pitch", "Timbre", "Rhythm", "Custom" };
 const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
 const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
 const char* const kPlaybackChoices[] = { "Blend", "Voices", "Sample" };
@@ -84,6 +85,13 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "cue_source",         "Cue Source",            ParamType::Choice, 0,    4,      0,     0,    "",       CHOICE (kCueSourceChoices),    true },
     { "feature_focus",      "Feature Focus",         ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kFocusChoices),        true },
     { "recency",            "Recency",               ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    // address sets
+    { "address",            "Address",               ParamType::Choice, 0,    5,      0,     0,    "",       CHOICE (kAddressChoices),      true },
+    { "spectrum_weight",    "Spectrum Weight",       ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
+    { "pitch_class_weight", "Pitch Class Weight",    ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "pitch_weight",       "Pitch Weight",          ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "timbre_weight",      "Timbre Weight",         ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "rhythm_weight",      "Rhythm Weight",         ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     // sequential context
     { "sequence_context",   "Sequence Context",      ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
     { "context_cue",        "Context Cue",           ParamType::Choice, 0,    2,      1,     0,    "",       CHOICE (kContextCueChoices),   true },
@@ -241,6 +249,8 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.cueSource = static_cast<CueSource> (idx (kCueSource));
     p.featureFocus = static_cast<FeatureFocus> (idx (kFeatureFocus));
     p.recency = v (kRecency);
+    p.address = static_cast<AddressMode> (idx (kAddress));
+    p.addressWeights = { v (kSpectrumWeight), v (kPitchClassWeight), v (kPitchWeight), v (kTimbreWeight), v (kRhythmWeight) };
     p.sequenceContext = on (kSequenceContext);
     p.contextCue = static_cast<ContextCue> (idx (kContextCue));
     p.contextWeight = v (kContextWeight);
@@ -307,6 +317,27 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.midiChannel = idx (kMidiChannel);
     p.midiBaseNote = idx (kMidiBaseNote);
     return p;
+}
+
+std::array<float, kNumAddressSets> effectiveAddressWeights (const EngineParams& p)
+{
+    std::array<float, kNumAddressSets> w {};
+    if (p.address == AddressMode::Custom)
+    {
+        float total = 0.0f;
+        for (int s = 0; s < kNumAddressSets; ++s)
+        {
+            w[static_cast<size_t> (s)] = std::max (0.0f, p.addressWeights[static_cast<size_t> (s)]);
+            total += w[static_cast<size_t> (s)];
+        }
+        if (total > 0.0f)
+            return w;
+        w.fill (0.0f);
+        w[0] = 1.0f; // nothing weighted: the spectrum
+        return w;
+    }
+    w[static_cast<size_t> (std::clamp (static_cast<int> (p.address), 0, kNumAddressSets - 1))] = 1.0f;
+    return w;
 }
 
 double divisionQuarters (TraceDivision d, int num, int den)

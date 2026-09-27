@@ -7,16 +7,19 @@
 namespace {
 
 template <typename Value>
-void drawAddressImpl (juce::Graphics& g, juce::Rectangle<float> area, Value valueAt)
+void drawAddressImpl (juce::Graphics& g, juce::Rectangle<float> area, int set, Value valueAt)
 {
+    // Time left to right; each slot's values bottom to top (bands, pitch
+    // classes, semitones, ...), in the set's own layout.
     g.setColour (theme::background);
     g.fillRect (area);
-    const float cw = area.getWidth() / mse::kSlots;
-    const float ch = area.getHeight() / mse::kBands;
-    for (int s = 0; s < mse::kSlots; ++s)
-        for (int b = 0; b < mse::kBands; ++b)
+    const auto layout = mse::kSetLayouts[static_cast<size_t> (juce::jlimit (0, mse::kNumSets - 1, set))];
+    const float cw = area.getWidth() / static_cast<float> (layout.slots);
+    const float ch = area.getHeight() / static_cast<float> (layout.width);
+    for (int s = 0; s < layout.slots; ++s)
+        for (int b = 0; b < layout.width; ++b)
         {
-            g.setColour (valueAt (s * mse::kBands + b));
+            g.setColour (valueAt (s * layout.width + b));
             g.fillRect (area.getX() + s * cw, area.getBottom() - (b + 1) * ch, cw + 0.5f, ch + 0.5f);
         }
     g.setColour (theme::outline);
@@ -38,14 +41,27 @@ juce::String traceText (const mse::TraceView& r)
 
 } // namespace
 
-void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const float* values)
+void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const float* values, int set)
 {
-    drawAddressImpl (g, area, [values] (int i) { return theme::heat (values[i]); });
+    drawAddressImpl (g, area, set, [values] (int i) { return theme::heat (values[i]); });
 }
 
-void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const int8_t* q)
+void drawAddress (juce::Graphics& g, juce::Rectangle<float> area, const int8_t* q, int set)
 {
-    drawAddressImpl (g, area, [q] (int i) { return theme::heat (static_cast<float> (q[i]) / mse::MemoryView::kThumbScale); });
+    drawAddressImpl (g, area, set, [q] (int i) { return theme::heat (static_cast<float> (q[i]) / mse::MemoryView::kThumbScale); });
+}
+
+juce::String addressLayoutText (int set)
+{
+    switch (static_cast<mse::AddressSet> (set))
+    {
+        case mse::AddressSet::Spectrum:   return "16 time slots x 24 bands";
+        case mse::AddressSet::PitchClass: return "32 time slots x 12 pitch classes";
+        case mse::AddressSet::Pitch:      return "8 time slots x 48 semitones, C2-B5";
+        case mse::AddressSet::Timbre:     return "16 time slots x shape | brightness";
+        case mse::AddressSet::Rhythm:     return "96 steps x onsets in 4 ranges";
+    }
+    return {};
 }
 
 // ---- MemoryMatrix -------------------------------------------------------------------
@@ -103,8 +119,9 @@ void MemoryMatrix::update (const mse::MemoryView& v)
     // With sequence context each row is [n-1 | n]: the context half first.
     const int rowsShown = displayRows();
     const int imageRows = juce::jlimit (1, rowsShown, juce::jmax (1, getHeight()));
-    const int cols = v.sequence ? 2 * mse::kFeatureSize : mse::kFeatureSize;
+    const int cols = v.sequence ? 2 * mse::kSetSize : mse::kSetSize;
     sequence = v.sequence;
+    shownSet = v.shownSet;
     if (! heat.isValid() || heat.getHeight() != imageRows || heat.getWidth() != cols)
     {
         heat = juce::Image (juce::Image::ARGB, cols, imageRows, true);
@@ -130,12 +147,12 @@ void MemoryMatrix::update (const mse::MemoryView& v)
             if (sequence)
             {
                 const int8_t* c = v.contextThumb (row);
-                for (int j = 0; j < mse::kFeatureSize; ++j)
+                for (int j = 0; j < mse::kSetSize; ++j)
                     line[j] = theme::heatQ (c[j]);
-                line += mse::kFeatureSize;
+                line += mse::kSetSize;
             }
             const int8_t* t = v.thumb (row);
-            for (int j = 0; j < mse::kFeatureSize; ++j)
+            for (int j = 0; j < mse::kSetSize; ++j)
                 line[j] = theme::heatQ (t[j]);
         }
     }
@@ -154,7 +171,8 @@ void MemoryMatrix::paint (juce::Graphics& g)
         g.drawImage (heat, heatRect, juce::RectanglePlacement::stretchToFit);
     }
     // Slot separators.
-    const int slots = sequence ? 2 * mse::kSlots : mse::kSlots;
+    const int setSlots = mse::kSetLayouts[static_cast<size_t> (juce::jlimit (0, mse::kNumSets - 1, shownSet))].slots;
+    const int slots = sequence ? 2 * setSlots : setSlots;
     const float slotW = heatRect.getWidth() / static_cast<float> (slots);
     if (slotW >= 10.0f)
     {
@@ -388,8 +406,9 @@ void MemorySidePanel::updateAuditionButtons()
 
 void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
 {
-    heard = v.heard;
-    heardBefore = v.heardBefore;
+    shownSet = v.shownSet;
+    heard = v.shown (v.heard);
+    heardBefore = v.shown (v.heardBefore);
     hasEcho = v.echoContent (echo);
     v.echoContextContent (echoContext);
     sequence = v.sequence;
@@ -404,8 +423,8 @@ void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
         {
             hasSelection = true;
             sel = v.rows[static_cast<size_t> (i)];
-            std::copy (v.thumb (i), v.thumb (i) + mse::kFeatureSize, selThumb.begin());
-            std::copy (v.contextThumb (i), v.contextThumb (i) + mse::kFeatureSize, selContextThumb.begin());
+            std::copy (v.thumb (i), v.thumb (i) + mse::kSetSize, selThumb.begin());
+            std::copy (v.contextThumb (i), v.contextThumb (i) + mse::kSetSize, selContextThumb.begin());
             break;
         }
     lockButton.setVisible (hasSelection);
@@ -450,8 +469,8 @@ void MemorySidePanel::paint (juce::Graphics& g)
     // Two halves side by side, [n-1 | n].
     auto drawPair = [&] (juce::Rectangle<int> area, const float* before, const float* now) {
         auto left = area.removeFromLeft (area.getWidth() / 2);
-        drawAddress (g, left.withTrimmedRight (2).toFloat(), before);
-        drawAddress (g, area.withTrimmedLeft (2).toFloat(), now);
+        drawAddress (g, left.withTrimmedRight (2).toFloat(), before, shownSet);
+        drawAddress (g, area.withTrimmedLeft (2).toFloat(), now, shownSet);
     };
     juce::Rectangle<int> heardImg, echoImg;
     if (sequence)
@@ -467,14 +486,14 @@ void MemorySidePanel::paint (juce::Graphics& g)
     {
         heardImg = caption (heardArea, "HEARD");
         echoImg = caption (echoArea, "ECHO");
-        drawAddress (g, heardImg.toFloat(), heard.data());
+        drawAddress (g, heardImg.toFloat(), heard.data(), shownSet);
     }
     if (hasEcho)
     {
         if (sequence)
             drawPair (echoImg, echoContext.data(), echo.data());
         else
-            drawAddress (g, echoImg.toFloat(), echo.data());
+            drawAddress (g, echoImg.toFloat(), echo.data(), shownSet);
     }
     else
     {
@@ -519,12 +538,12 @@ void MemorySidePanel::paint (juce::Graphics& g)
     {
         auto img = s.removeFromTop (imgH);
         auto left = img.removeFromLeft (img.getWidth() / 2);
-        drawAddress (g, left.withTrimmedRight (2).toFloat(), selContextThumb.data());
-        drawAddress (g, img.withTrimmedLeft (2).toFloat(), selThumb.data());
+        drawAddress (g, left.withTrimmedRight (2).toFloat(), selContextThumb.data(), shownSet);
+        drawAddress (g, img.withTrimmedLeft (2).toFloat(), selThumb.data(), shownSet);
     }
     else
     {
-        drawAddress (g, s.removeFromTop (imgH).toFloat(), selThumb.data());
+        drawAddress (g, s.removeFromTop (imgH).toFloat(), selThumb.data(), shownSet);
     }
     s.removeFromTop (4);
     g.setColour (theme::text);

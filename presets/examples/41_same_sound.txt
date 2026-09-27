@@ -1,0 +1,8 @@
+# Address = Timbre: bars are recalled by what they sound like, not which
+# notes they play. Style A's bright pad and style B's darker stabs each
+# recall their own kind from memory, whatever the chord.
+address = Timbre
+capacity = 100
+power = 9
+self_match = off
+dry_level_db = -60

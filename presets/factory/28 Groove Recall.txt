@@ -1,0 +1,8 @@
+# Address = Rhythm: bars are recalled by where their attacks fall (low,
+# mid and high separately), whatever they play. Like Rhythm Match, with
+# onsets instead of loudness.
+address = Rhythm
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -6

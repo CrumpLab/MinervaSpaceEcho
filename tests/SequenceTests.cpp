@@ -160,6 +160,28 @@ TEST_CASE ("Echo Chain walks through a learned sequence on its own")
     }
 }
 
+TEST_CASE ("Echo Chain switched on after the input stops continues from the echo")
+{
+    // Learn ABCD twice, play A, stop; switch the chain on one segment later.
+    // The input is silent by then, so the chain starts from the echo that is
+    // playing (B) instead of waiting for input, and keeps walking.
+    auto p = contextParams (ContextCue::PredictNext);
+    p.chainStep = ChainStep::Blend;
+    EchoEngine e;
+    prepare (e, p, 20);
+    run (e, sequence ("ABCDABCDA-"));
+    p.cueSource = CueSource::EchoChain;
+    e.setParams (p);
+    const auto out = run (e, sequence ("-----"));
+    // Segment 0 of this run plays what followed B (C), then D, A, B.
+    const std::string expected = "CDAB";
+    for (int k = 0; k < 4; ++k)
+    {
+        INFO ("segment " << k << " expected " << expected[static_cast<size_t> (k)]);
+        REQUIRE (segmentMatch (out, k, expected[static_cast<size_t> (k)]) > 0.8);
+    }
+}
+
 TEST_CASE ("Chain Input 1 follows the input exactly like Predict Next")
 {
     auto render = [] (bool chain) {

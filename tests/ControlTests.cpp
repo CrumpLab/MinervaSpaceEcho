@@ -76,9 +76,9 @@ TEST_CASE ("Memory view mirrors memory and shows which trace answers")
     REQUIRE (v.rows[0].seconds == Catch::Approx (0.5).margin (0.01));
     // Each row carries its trace's address.
     int nonZero = 0;
-    for (int j = 0; j < kFeatureSize; ++j)
+    for (int j = 0; j < kSetSize; ++j)
         nonZero += v.thumb (0)[j] != 0 ? 1 : 0;
-    REQUIRE (nonZero > kFeatureSize / 4);
+    REQUIRE (nonZero > kSetSize / 4);
 
     // Now cue with 440: the 440 trace answers and plays on head 1.
     run (e, tone (440, kSeg - 4800 - kViewRun));
@@ -91,13 +91,13 @@ TEST_CASE ("Memory view mirrors memory and shows which trace answers")
             best = i;
     REQUIRE (best == 0);
     REQUIRE (v2.rows[0].play[0] > 0.0f);
-    FeatureVector echo;
+    SetVector echo;
     REQUIRE (v2.echoContent (echo));
     // With power 9 the 440 Hz trace dominates: the echo looks like it.
-    std::array<float, kFeatureSize> row0 {};
-    for (int j = 0; j < kFeatureSize; ++j)
+    std::array<float, kSetSize> row0 {};
+    for (int j = 0; j < kSetSize; ++j)
         row0[static_cast<size_t> (j)] = v2.thumb (0)[j];
-    REQUIRE (similarity (echo, row0, Similarity::Cosine) > 0.9);
+    REQUIRE (setSimilarity (echo.data(), row0.data(), Similarity::Cosine) > 0.9);
     REQUIRE (v2.intensity > 0.0f);
 }
 

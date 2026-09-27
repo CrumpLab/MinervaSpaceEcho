@@ -55,6 +55,7 @@ website:
           - guide/heads.qmd
           - guide/tape.qmd
           - guide/spectral.qmd
+          - guide/addresses.qmd
           - guide/sequences.qmd
           - guide/presets.qmd
           - guide/import-save.qmd

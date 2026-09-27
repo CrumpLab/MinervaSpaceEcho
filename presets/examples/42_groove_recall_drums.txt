@@ -1,0 +1,9 @@
+# Address = Rhythm, 1/4-note traces over the drum loop: each beat recalls
+# beats with the same attack pattern (kick, snare or hats in the same
+# places), whatever else is going on.
+address = Rhythm
+trace_division = 1/4
+capacity = 200
+power = 9
+self_match = off
+dry_level_db = -60

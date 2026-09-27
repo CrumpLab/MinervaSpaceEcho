@@ -26,6 +26,9 @@ enum class LengthMismatch { Varispeed, Cut, Loop, Stretch };
 enum class BlendDomain { Waveform, Spectral };
 enum class ContextCue { MatchBoth, PredictNext, CurrentOnly };
 enum class ChainStep { Blend, Sample };
+// Stage 10: which address sets retrieval compares (Custom: the weights).
+enum class AddressMode { Spectrum, PitchClass, Pitch, Timbre, Rhythm, Custom };
+constexpr int kNumAddressSets = 5;
 
 // RE-201-style head combinations. Custom uses the per-head settings.
 enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
@@ -87,6 +90,10 @@ struct EngineParams
     CueSource cueSource = CueSource::Input;
     FeatureFocus featureFocus = FeatureFocus::Full;
     float recency = 0.0f;                              // favour recently stored traces
+
+    // address sets (Stage 10): Spectrum, Pitch Class, Pitch, Timbre, Rhythm
+    AddressMode address = AddressMode::Spectrum;
+    std::array<float, kNumAddressSets> addressWeights = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f }; // Custom only
 
     // sequential context (Stage 9; Jamieson & Mewhort 2009): every trace also
     // stores the previous segment's address, [n-1 | n]
@@ -183,6 +190,7 @@ enum ParamIndex
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
     kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
     kCueSource, kFeatureFocus, kRecency,
+    kAddress, kSpectrumWeight, kPitchClassWeight, kPitchWeight, kTimbreWeight, kRhythmWeight,
     kSequenceContext, kContextCue, kContextWeight, kChainInput, kChainStep, kCueNoise, kHabituation,
     kModeSelector, kHead1LevelDb, kHead1Pan, kHead2Mode, kHead2LevelDb, kHead2Pan, kHead3Mode, kHead3LevelDb, kHead3Pan,
     kPlayback, kVoices, kVoiceSpread, kVoiceDetune, kVoiceDelayMs,
@@ -216,6 +224,9 @@ using ParamValues = std::array<float, kNumParams>;
 const std::array<ParamSpec, kNumParams>& paramSpecs();
 ParamValues defaultParamValues();
 int findParam (std::string_view id); // -1 if unknown
+
+// The address-set weights in effect (a one-hot vector unless Custom).
+std::array<float, kNumAddressSets> effectiveAddressWeights (const EngineParams& p);
 
 // Converts raw values (real units; choice/bool as index) into EngineParams.
 // Out-of-range values are clamped.

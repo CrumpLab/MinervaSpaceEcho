@@ -26,6 +26,7 @@ struct TraceRecord
     bool clamped = false;
     FeatureVector features {};
     FeatureVector context {};                // previous segment's address (all 0 = none)
+    bool hasSets = true;                     // false: read from a file without address sets (Stage 10)
 
     int64_t length() const { return audio.empty() ? 0 : static_cast<int64_t> (audio[0].size()); }
 };
@@ -49,6 +50,12 @@ MemorySnapshot readMemoryFolder (const std::string& dir);
 // Compact single-blob form (for plugin state). Throws on malformed input.
 std::vector<uint8_t> serializeMemory (const MemorySnapshot& snapshot);
 MemorySnapshot deserializeMemory (const uint8_t* data, size_t size);
+
+// Stage 10: gives traces read from older files (hasSets == false) their
+// Pitch Class, Pitch, Timbre and Rhythm sets, computed from their audio; the
+// context's sets come from the trace before it. The Spectrum set is kept as
+// saved (forgetting included). Done by the readers below.
+void completeAddressSets (MemorySnapshot& snapshot);
 
 // Linear-interpolation resample of every trace to a new sample rate.
 void resampleSnapshot (MemorySnapshot& snapshot, double newSampleRate);

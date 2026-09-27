@@ -12,7 +12,7 @@ Brooklyn College of CUNY.
 **Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: version 0.3.0.** Every stage of the plan is built (see
+**Status: version 0.4.0.** Every stage of the plan is built (see
 [`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
 
 The plugin cuts the input into traces
@@ -87,8 +87,9 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Prediction** | Play memory this far ahead of the current position: hear what came next last time. |
 | **Cue Smoothing** | Crossfade whenever a live cue changes the echo. |
 | **Cue Source** | What cues memory: the Input, the **Sidechain** (route another track to the plugin's sidechain input in Live), a Random address (memory dreams), Frozen (the last live cue, held), or **Echo Chain** (each echo cues the next). |
-| **Feature Focus** | Match on everything, on Rhythm only (loudness over time), or on Timbre only (average spectrum). Applies to Segment and Progressive cueing. |
+| **Feature Focus** | Within the Spectrum address: match on everything, on Rhythm only (loudness over time), or on Timbre only (average spectrum). Applies to Segment and Progressive cueing. |
 | **Recency** | Favour recently stored traces (0 = no preference). |
+| **Address** / **Spectrum, Pitch Class, Pitch, Timbre, Rhythm Weight** | What memory compares. Every trace stores five addresses: **Spectrum** (the original 16 × 24 band spectrogram), **Pitch Class** (notes, octave-blind), **Pitch** (notes with register, C2–B5), **Timbre** (spectral shape and brightness, aligned to the fundamental so it ignores the note) and **Rhythm** (onsets in four frequency ranges). **Custom** mixes them with the weights (weighted mean of the sets' similarities). |
 | **Sequence Context** / **Context Cue** / **Context Weight** | Traces store the previous segment's address too, [n−1 \| n]. **Predict Next** matches the segment just played against traces' n−1 halves, so you hear what came next last time; **Match Both** recalls the trace matching the last two segments; **Current Only** ignores context. Context Weight sets how much n−1 counts in Match Both. |
 | **Chain Step** / **Cue Noise** / **Habituation** | How the chain wanders: **Sample** steps to one answering trace drawn by activation (a random walk through memory), **Blend** to the echo's blended content (deterministic). Cue Noise adds noise to every cue; Habituation makes traces that just answered briefly less active. |
 | **Running** | Paused: memory untouched, echo off, dry passes; audition still works. |
@@ -299,7 +300,7 @@ This is experimental software, written with help from [Claude Code](https://clau
 
 GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
 
-> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.3.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.4.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 

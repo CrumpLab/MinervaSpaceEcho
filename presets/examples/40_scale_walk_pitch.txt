@@ -1,0 +1,16 @@
+# The scale input (C to C' and back to C, a note per bar), then the echo
+# chain walks memory on its own from bar 9 with Address = Pitch:
+# each note's successor is recalled, so the walk plays the scale, C' included.
+sequence_context = on
+context_cue = Predict Next
+address = Pitch
+capacity = 100
+power = 6
+echo_level_db = -4
+@9 freeze = on
+@9 cue_source = Echo Chain
+@9 chain_input = 0
+@9 chain_step = Sample
+@9 playback = Sample
+@9 habituation = 0.4
+@9 cue_noise = 0.15

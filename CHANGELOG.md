@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0] - 2026-09-27
+
+### Stage 10: address sets
+- Every trace stores five addresses: **Spectrum** (the original), **Pitch
+  Class** (chroma, octave-blind), **Pitch** (semitones C2–B5), **Timbre**
+  (spectral shape and brightness, aligned to the fundamental) and **Rhythm**
+  (onsets in four frequency ranges). The **Address** parameter chooses which
+  one memory compares; **Custom** mixes them with five weights (weighted mean
+  of the sets' similarities). Sequence context stores every set too.
+- With a pitch address the echo chain follows melodies: a scale learned one
+  note per bar is walked back in order (with the Spectrum, neighbouring notes
+  are 0.98 similar and the walk drifts).
+- The memory matrix and side panel show the set being compared, in its own
+  layout; new **Address** parameter page.
+- Memory files store every set; memory saved by earlier versions gets the new
+  sets computed from its audio. Older versions still read new files.
+- The default (Spectrum) renders exactly as before: every factory preset and
+  earlier listening example is bit-identical.
+- Echo Chain switched on after the input has stopped now starts from the echo
+  that is playing (it used to wait for input).
+- Factory presets *Scale Walker*, *Melody Memory*, *Same Sound*, *Groove
+  Recall*; listening examples 38–42 and a scale test signal; an Addresses page
+  in the manual.
+
 ## [0.3.0] - 2026-09-27
 
 - **Running / Paused** (header button and parameter): pausing leaves memory

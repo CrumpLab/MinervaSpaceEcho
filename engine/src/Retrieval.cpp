@@ -9,18 +9,18 @@ namespace {
 constexpr float kNegligible = 1.0e-5f; // relative to the strongest activation
 }
 
-float similarity (const FeatureVector& p, const FeatureVector& t, Similarity kind) noexcept
+float setSimilarity (const float* p, const float* t, Similarity kind) noexcept
 {
     // Eight independent float lanes so the loops vectorise; lanes are
     // combined in double.
     constexpr int kLanes = 8;
-    static_assert (kFeatureSize % kLanes == 0);
+    static_assert (kSetSize % kLanes == 0);
     float dot[kLanes] {}, a[kLanes] {}, b[kLanes] {};
-    const float* __restrict pv = p.data();
-    const float* __restrict tv = t.data();
+    const float* __restrict pv = p;
+    const float* __restrict tv = t;
     if (kind == Similarity::Hintzman)
     {
-        for (int j = 0; j < kFeatureSize; j += kLanes)
+        for (int j = 0; j < kSetSize; j += kLanes)
             for (int l = 0; l < kLanes; ++l)
             {
                 const float x = pv[j + l], y = tv[j + l];
@@ -38,7 +38,7 @@ float similarity (const FeatureVector& p, const FeatureVector& t, Similarity kin
         return static_cast<float> (std::clamp (d / n, -1.0, 1.0));
     }
 
-    for (int j = 0; j < kFeatureSize; j += kLanes)
+    for (int j = 0; j < kSetSize; j += kLanes)
         for (int l = 0; l < kLanes; ++l)
         {
             const float x = pv[j + l], y = tv[j + l];
@@ -56,6 +56,88 @@ float similarity (const FeatureVector& p, const FeatureVector& t, Similarity kin
     if (pp <= 0.0 || tt <= 0.0)
         return 0.0f;
     return static_cast<float> (std::clamp (d / std::sqrt (pp * tt), -1.0, 1.0));
+}
+
+float similarity (const FeatureVector& p, const FeatureVector& t, Similarity kind) noexcept
+{
+    return setSimilarity (p.data(), t.data(), kind);
+}
+
+AddressWeights sanitiseWeights (const AddressWeights& weights) noexcept
+{
+    AddressWeights w {};
+    float total = 0.0f;
+    for (int s = 0; s < kNumSets; ++s)
+    {
+        const float x = weights[static_cast<size_t> (s)];
+        w[static_cast<size_t> (s)] = std::isfinite (x) ? std::max (0.0f, x) : 0.0f;
+        total += w[static_cast<size_t> (s)];
+    }
+    return total > 0.0f ? w : kSpectrumOnly;
+}
+
+int dominantSet (const AddressWeights& weights) noexcept
+{
+    int best = 0;
+    for (int s = 1; s < kNumSets; ++s)
+        if (weights[static_cast<size_t> (s)] > weights[static_cast<size_t> (best)])
+            best = s;
+    return best;
+}
+
+namespace {
+// Combines per-set similarities: one weighted set is returned exactly.
+template <typename SetSim>
+float weightedSets (const AddressWeights& weights, SetSim&& setSim) noexcept
+{
+    double num = 0.0, den = 0.0;
+    int used = 0, only = 0;
+    for (int s = 0; s < kNumSets; ++s)
+        if (weights[static_cast<size_t> (s)] > 0.0f)
+        {
+            ++used;
+            only = s;
+        }
+    if (used == 0)
+        return setSim (0);
+    if (used == 1)
+        return setSim (only);
+    for (int s = 0; s < kNumSets; ++s)
+    {
+        const float w = weights[static_cast<size_t> (s)];
+        if (w <= 0.0f)
+            continue;
+        num += static_cast<double> (w) * setSim (s);
+        den += w;
+    }
+    return static_cast<float> (num / den);
+}
+} // namespace
+
+float addressSimilarity (const FeatureVector& p, const FeatureVector& t, Similarity kind, const AddressWeights& weights,
+                         FeatureFocus focus) noexcept
+{
+    return weightedSets (weights, [&] (int s) {
+        if (s == 0 && focus != FeatureFocus::Full)
+            return focusedSimilarity (p, t, kind, focus, 0, kSlots, false);
+        return setSimilarity (p.data() + setOffset (s), t.data() + setOffset (s), kind);
+    });
+}
+
+float addressPrefixSimilarity (const FeatureVector& p, const FeatureVector& t, Similarity kind,
+                               const AddressWeights& weights, FeatureFocus focus, int slotBegin, int slotEnd,
+                               bool renormalize) noexcept
+{
+    return weightedSets (weights, [&] (int s) {
+        if (s == 0)
+            return focusedSimilarity (p, t, kind, focus, slotBegin, slotEnd, renormalize);
+        // The same stretch of the segment on this set's slots (a partly heard slot counts).
+        const auto layout = kSetLayouts[static_cast<size_t> (s)];
+        const int b = slotBegin * layout.slots / kSlots;
+        const int e = std::max (b + 1, (slotEnd * layout.slots + kSlots - 1) / kSlots);
+        return setPrefixSimilarity (p.data() + setOffset (s), t.data() + setOffset (s), layout.width, kind, b, e,
+                                    renormalize);
+    });
 }
 
 float activation (float s, float power) noexcept
@@ -125,9 +207,7 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
             continue;
         const auto& t = store.slot (slot);
         auto half = [&settings] (const FeatureVector& p, const FeatureVector& f) {
-            return settings.focus == FeatureFocus::Full
-                       ? similarity (p, f, settings.similarity)
-                       : focusedSimilarity (p, f, settings.similarity, settings.focus, 0, kSlots, false);
+            return addressSimilarity (p, f, settings.similarity, settings.address, settings.focus);
         };
         float s;
         if (settings.contextProbe == nullptr || settings.contextWeight <= 0.0f)
@@ -143,8 +223,15 @@ RetrievalResult retrieve (const FeatureVector& probe, const TraceStore& store,
 float prefixSimilarity (const FeatureVector& p, const FeatureVector& t, Similarity kind,
                         int slotBegin, int slotEnd, bool renormalize) noexcept
 {
-    const size_t j0 = static_cast<size_t> (std::clamp (slotBegin, 0, kSlots)) * kBands;
-    const size_t j1 = static_cast<size_t> (std::clamp (slotEnd, 0, kSlots)) * kBands;
+    return setPrefixSimilarity (p.data(), t.data(), kBands, kind, slotBegin, slotEnd, renormalize);
+}
+
+float setPrefixSimilarity (const float* p, const float* t, int width, Similarity kind,
+                           int slotBegin, int slotEnd, bool renormalize) noexcept
+{
+    const int slots = kSetSize / std::max (1, width);
+    const size_t j0 = static_cast<size_t> (std::clamp (slotBegin, 0, slots)) * static_cast<size_t> (width);
+    const size_t j1 = static_cast<size_t> (std::clamp (slotEnd, 0, slots)) * static_cast<size_t> (width);
     if (j1 <= j0)
         return 0.0f;
 
@@ -243,7 +330,7 @@ float focusedSimilarity (const FeatureVector& probe, const FeatureVector& trace,
 void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, FeatureMode mode,
                    float ternaryThreshold, FeatureVector& out, bool contextHalf) noexcept
 {
-    std::array<double, kFeatureSize> acc {};
+    std::array<double, kAddressSize> acc {};
     double total = 0.0;
     for (int i = 0; i < n; ++i)
     {
@@ -258,30 +345,36 @@ void echoAddress (const EchoWeight* weights, int n, const TraceStore& store, Fea
     if (total <= 0.0)
         return;
 
-    double sum = 0.0, sq = 0.0;
-    int count = 0;
-    for (auto& a : acc)
+    // Each set is re-normalised on its own, like a stored address.
+    for (int set = 0; set < kNumSets; ++set)
     {
-        a /= total;
-        if (a != 0.0)
+        const auto j0 = static_cast<size_t> (setOffset (set)), j1 = j0 + kSetSize;
+        double sum = 0.0, sq = 0.0;
+        int count = 0;
+        for (size_t j = j0; j < j1; ++j)
         {
-            sum += a;
-            sq += a * a;
-            ++count;
+            auto& a = acc[j];
+            a /= total;
+            if (a != 0.0)
+            {
+                sum += a;
+                sq += a * a;
+                ++count;
+            }
         }
-    }
-    if (count < 2)
-        return;
-    const double mean = sum / count;
-    const double sd = std::sqrt (std::max (1.0e-12, sq / count - mean * mean));
-    for (size_t j = 0; j < acc.size(); ++j)
-    {
-        if (acc[j] == 0.0)
+        if (count < 2)
             continue;
-        auto z = static_cast<float> ((acc[j] - mean) / sd);
-        if (mode == FeatureMode::Ternary)
-            z = z > ternaryThreshold ? 1.0f : (z < -ternaryThreshold ? -1.0f : 0.0f);
-        out[j] = z;
+        const double mean = sum / count;
+        const double sd = std::sqrt (std::max (1.0e-12, sq / count - mean * mean));
+        for (size_t j = j0; j < j1; ++j)
+        {
+            if (acc[j] == 0.0)
+                continue;
+            auto z = static_cast<float> ((acc[j] - mean) / sd);
+            if (mode == FeatureMode::Ternary)
+                z = z > ternaryThreshold ? 1.0f : (z < -ternaryThreshold ? -1.0f : 0.0f);
+            out[j] = z;
+        }
     }
 }
 
@@ -362,7 +455,8 @@ OffsetMatch bestOffset (const WindowProbe& probe, const TraceSlot& trace, int mi
     return best;
 }
 
-BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Similarity kind, bool unclampedOnly) noexcept
+BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Similarity kind, bool unclampedOnly,
+                     const AddressWeights& weights) noexcept
 {
     BestMatch best;
     for (int i = 0; i < store.size(); ++i)
@@ -370,7 +464,7 @@ BestMatch bestMatch (const FeatureVector& probe, const TraceStore& store, Simila
         const auto& t = store.slot (store.storedSlot (i));
         if (unclampedOnly && t.clamped)
             continue;
-        const float s = similarity (probe, t.features, kind);
+        const float s = addressSimilarity (probe, t.features, kind, weights);
         if (s > best.similarity)
             best = { i, s };
     }

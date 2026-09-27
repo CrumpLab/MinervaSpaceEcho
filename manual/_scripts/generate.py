@@ -155,7 +155,8 @@ def write_listening():
                    "(see `.github/workflows/docs.yml`). This build has none, so only the descriptions are shown.\n:::\n")
     else:
         out.append("### The input {#input}\n")
-        for stem, label in (("input_style_change", "Style change (most examples)"), ("input_drums", "Drums (short-trace and drum examples)")):
+        for stem, label in (("input_style_change", "Style change (most examples)"), ("input_drums", "Drums (short-trace and drum examples)"),
+                            ("input_scale", "C major scale (scale-walk examples)")):
             if (audio / f"{stem}.mp3").exists():
                 out.append(f"**{label}**\n\n<audio controls preload=\"none\" src=\"audio/{stem}.mp3\"></audio>\n")
     for f in sorted((ROOT / "presets/examples").glob("*.txt")):

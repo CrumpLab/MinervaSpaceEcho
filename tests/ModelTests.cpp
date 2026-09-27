@@ -83,7 +83,7 @@ TEST_CASE ("Features: silence is flagged and all-zero; ternary values are -1/0/+
         REQUIRE ((x == -1.0f || x == 0.0f || x == 1.0f));
         nonZero += x != 0.0f;
     }
-    REQUIRE (nonZero > kFeatureSize / 4);
+    REQUIRE (nonZero > kSetSize / 4);
 }
 
 TEST_CASE ("Features: unfilled slots stay unencoded (0)")
