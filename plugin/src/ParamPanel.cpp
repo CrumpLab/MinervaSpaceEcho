@@ -22,11 +22,12 @@ const std::vector<PageSpec>& pageSpecs()
                       "clamp_budget", "clamp_protects" } },
         { "Forgetting", { "encoding_failure", "content_dropout", "decay_forget", "decay_fade_db", "wear_tone" } },
         { "Retrieval", { "power", "similarity", "feature_mode", "ternary_threshold", "self_match", "cue_gate_db",
-                         "negative_mode", "normalization", "level_tracking", "recency", "feature_focus" } },
+                         "negative_mode", "normalization", "level_tracking", "recency", "feature_focus", "cue_noise",
+                         "habituation" } },
         { "Cueing", { "cue_mode", "cue_source", "progressive_start", "rolling_window_ms", "rolling_interval_ms",
                       "lookahead_ms", "cue_smoothing_ms" } },
-        { "Sequence", { "sequence_context", "context_cue", "context_weight", "cue_source", "chain_input", "power",
-                        "self_match", "playback", "cue_mode" } },
+        { "Sequence", { "sequence_context", "context_cue", "context_weight", "cue_source", "chain_input", "chain_step",
+                        "cue_noise", "habituation", "power", "self_match", "playback", "cue_mode" } },
         { "Heads", { "mode_selector", "head1_level_db", "head1_pan", "head2_mode", "head2_level_db", "head2_pan", "head3_mode",
                      "head3_level_db", "head3_pan", "playback", "voices", "voice_spread", "voice_detune", "voice_delay_ms" } },
         { "Tape", { "length_mismatch", "wow", "flutter", "tape_drive", "hiss_db", "feedback_bass_db", "feedback_treble_db",
@@ -34,7 +35,7 @@ const std::vector<PageSpec>& pageSpecs()
                     "intensity_to_feedback" } },
         { "Spectral", { "blend_domain", "spectral_voices", "spectral_freeze", "max_active", "length_mismatch" } },
         { "Mix", { "feedback", "echo_level_db", "dry_level_db", "edge_fade_ms", "output_gain_db" } },
-        { "Control", { "midi_control", "midi_channel", "midi_base_note", "capture", "trigger_clamp_last", "trigger_clamp_all",
+        { "Control", { "running", "midi_control", "midi_channel", "midi_base_note", "capture", "trigger_clamp_last", "trigger_clamp_all",
                        "trigger_unclamp_all", "trigger_clear_unclamped", "trigger_clear_all", "embed_memory" } },
     };
     return specs;
@@ -280,7 +281,7 @@ void ParamPanel::updateRelevance()
             else if (id == "context_weight")
                 relevant = value ("sequence_context") != 0 && value ("context_cue") == static_cast<int> (mse::ContextCue::MatchBoth)
                            && value ("cue_source") != static_cast<int> (mse::CueSource::EchoChain);
-            else if (id == "chain_input")
+            else if (id == "chain_input" || id == "chain_step")
                 relevant = value ("cue_source") == static_cast<int> (mse::CueSource::EchoChain);
             else if (id == "midi_channel" || id == "midi_base_note")
                 relevant = value ("midi_control") != 0;

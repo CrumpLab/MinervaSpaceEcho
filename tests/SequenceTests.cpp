@@ -147,6 +147,7 @@ TEST_CASE ("Echo Chain walks through a learned sequence on its own")
     run (e, sequence ("ABCDABCD"));
     p.cueSource = CueSource::EchoChain;
     p.chainInput = 0.0f;
+    p.chainStep = ChainStep::Blend; // deterministic: the expected continuation every step
     e.setParams (p);
     // Seed with A, then silence: the chain should play B C D A B C ...
     const auto out = run (e, sequence ("A-------"));
@@ -207,4 +208,99 @@ TEST_CASE ("Imported audio gets sequential context")
     REQUIRE (cosine (snap.traces[1].context, snap.traces[0].features) > 0.999);
     for (float v : snap.traces[2].context) // C followed silence: no context
         REQUIRE (v == 0.0f);
+}
+
+namespace {
+
+// Plays `steps` chain steps after seeding with A and returns, for each step,
+// which tone the echo sounds most like ('?' if none clearly).
+std::string walk (EngineParams p, const std::string& learn, int steps, uint64_t seed)
+{
+    EchoEngine e;
+    e.setSeed (seed);
+    prepare (e, p, 40);
+    run (e, sequence (learn));
+    p.cueSource = CueSource::EchoChain;
+    p.chainInput = 0.0f;
+    e.setParams (p);
+    const auto out = run (e, sequence ("A" + std::string (static_cast<size_t> (steps), '-')));
+    std::string heard;
+    for (int k = 1; k <= steps; ++k)
+    {
+        char best = '?';
+        double bestMatch = 0.6;
+        for (const auto& [name, freqs] : kTones)
+            if (const double m = segmentMatch (out, k, name); m > bestMatch)
+            {
+                bestMatch = m;
+                best = name;
+            }
+        heard += best;
+    }
+    return heard;
+}
+
+} // namespace
+
+TEST_CASE ("Chain Step Sample makes a random walk that follows learned transitions")
+{
+    // After A comes B or C equally often; B and C are always followed by A.
+    auto p = contextParams (ContextCue::PredictNext);
+    p.playback = Playback::Sample; // hear exactly the trace that steers
+    p.chainStep = ChainStep::Sample;
+    const std::string learn = "ABACABACABAC";
+    const auto heard = walk (p, learn, 24, 3);
+    INFO ("walk: " << heard);
+    int b = 0, c = 0, ok = 0;
+    for (size_t k = 0; k < heard.size(); ++k)
+    {
+        b += heard[k] == 'B';
+        c += heard[k] == 'C';
+        // Every step is a transition memory has seen: A -> B|C, B|C -> A.
+        const char prev = k == 0 ? 'A' : heard[k - 1];
+        const bool seen = (prev == 'A' && (heard[k] == 'B' || heard[k] == 'C')) || ((prev == 'B' || prev == 'C') && heard[k] == 'A');
+        ok += seen ? 1 : 0;
+    }
+    REQUIRE (b >= 3);  // both branches get visited...
+    REQUIRE (c >= 3);
+    REQUIRE (ok >= 20); // ...along transitions memory learned
+
+    // Blend never branches: after A it plays the same mixture of B and C
+    // every time, so the walk is periodic and the seed makes no difference.
+    p.chainStep = ChainStep::Blend;
+    p.playback = Playback::Blend;
+    const auto blended = walk (p, learn, 12, 3);
+    INFO ("blend walk: " << blended);
+    REQUIRE (walk (p, learn, 12, 99) == blended);
+    for (size_t k = 2; k + 2 < blended.size(); ++k)
+        REQUIRE (blended[k] == blended[k + 2]);
+}
+
+TEST_CASE ("Habituation moves the walk on from a trace that keeps answering")
+{
+    // A repeats; with Blend the chain sits on A forever. Habituation tires the
+    // A traces so the rare B gets its turn.
+    auto p = contextParams (ContextCue::PredictNext);
+    p.chainStep = ChainStep::Blend;
+    const std::string learn = "AAAAAAAB";
+    REQUIRE (walk (p, learn, 10, 1).find ('B') == std::string::npos);
+    p.habituation = 0.9f;
+    const auto heard = walk (p, learn, 10, 1);
+    INFO ("with habituation: " << heard);
+    REQUIRE (heard.find ('B') != std::string::npos);
+}
+
+TEST_CASE ("Cue Noise changes retrieval and is reproducible")
+{
+    auto p = contextParams (ContextCue::PredictNext);
+    p.chainStep = ChainStep::Sample;
+    p.playback = Playback::Sample;
+    const std::string learn = "ABACABAC";
+    const auto clean = walk (p, learn, 12, 5);
+    p.cueNoise = 0.8f;
+    const auto noisy1 = walk (p, learn, 12, 5);
+    const auto noisy2 = walk (p, learn, 12, 5);
+    INFO ("clean " << clean << ", noisy " << noisy1);
+    REQUIRE (noisy1 == noisy2);          // deterministic for a seed
+    REQUIRE (noisy1 != clean);           // and it does change the walk
 }

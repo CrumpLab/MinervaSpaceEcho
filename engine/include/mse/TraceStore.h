@@ -39,6 +39,7 @@ struct TraceSlot
     float rms = 0.0f;         // mono RMS of the recorded audio
     float strength = 1.0f;    // decays over time; multiplies the trace's activation
     float useCount = 0.0f;    // accumulated |activation| (slowly decaying)
+    float fatigue = 0.0f;     // Habituation: recently answered traces are less active (0..1)
     int generation = 0;       // 0 = heard; n = echo of generation n-1 material
     int mergeCount = 1;       // how many segments were consolidated into this trace
     bool clamped = false;     // clamped traces are never replaced (or decayed, optionally)
@@ -55,6 +56,7 @@ struct TraceSlot
         rms = 0.0f;
         strength = 1.0f;
         useCount = 0.0f;
+        fatigue = 0.0f;
         generation = 0;
         mergeCount = 1;
         clamped = false;

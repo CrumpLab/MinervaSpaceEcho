@@ -50,6 +50,9 @@ DOCS = {
     "context_cue": "**Match Both**: the last two segments against [n−1 | n] (sequence-sensitive recall). **Predict Next**: the last segment against traces' n−1 halves, so you hear what came next last time. **Current Only**: ordinary MINERVA II.",
     "context_weight": "Match Both: how much the n−1 half counts (0 = like Current Only, 1 = as much as the current half).",
     "chain_input": "Echo Chain: how much the live input steers the chain. 0 = memory walks on its own; 1 = the same as Predict Next from the input.",
+    "chain_step": "Echo Chain: what cues the next step. **Sample**: one of the answering traces, drawn in proportion to its activation (a random walk through memory; with Playback = Sample it is the trace you hear). **Blend**: the echo's blended content (deterministic; tends to settle on a prototype).",
+    "cue_noise": "Random noise (in standard deviations of the address) added to every cue: live, chain, iterative and progressive. Knocks retrieval out of ruts; also *fuzzy hearing* for live cues.",
+    "habituation": "Traces that just answered are less active for a few segments (their fatigue halves each segment), so memory moves on instead of repeating itself.",
     # heads
     "mode_selector": "The RE-201's head combinations: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3 (delay heads), Iterative 1+2+3, or **Custom** (use the per-head settings below).",
     "head1_level_db": "Level of head 1, the main echo.",
@@ -101,6 +104,8 @@ DOCS = {
     "dry_level_db": "Dry level. −60 dB = off.",
     "edge_fade_ms": "Fade length at trace edges and when the echo changes (declicking).",
     "output_gain_db": "Output gain.",
+    # running
+    "running": "**Paused**: memory is left exactly as it is (nothing stored, forgotten or cued), the echo fades out and the dry signal passes. Resuming starts cleanly at the next segment. Not changed by presets.",
     # plugin
     "embed_memory": "Save memory inside the Live set (off by default: about 23 MB per minute of stored audio).",
     "midi_control": "MIDI notes trigger actions (see [MIDI and automation](../guide/midi.qmd)).",

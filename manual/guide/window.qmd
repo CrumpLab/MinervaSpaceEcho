@@ -9,6 +9,10 @@ parameter pages, with a status bar along the bottom. It can be resized from the 
 
 ## Header
 
+**Running / Paused**: pausing leaves memory exactly as it is (nothing is stored, forgotten or cued), fades the echo
+out and passes the dry signal; everything else (inspecting, auditioning, clamping, importing, saving) still works.
+Resuming starts cleanly at the next segment. It is also a parameter, so you can MIDI-map or automate it.
+
 The preset menu with **<** and **>** to step through presets, and **Save…** to save your own
 ([Presets](presets.qmd)). On the right, the **MIDI** light flashes when a note arrives, and the version number.
 
@@ -31,6 +35,7 @@ last row stands for free slots. With more traces than pixels (grain memories), e
 strongest of the traces it covers.
 
 Hover over a row for its details. **Click** a row to inspect it in the side panel; click again to deselect.
+**Alt-click** a row to listen to it (again to stop); the row being auditioned is outlined in teal.
 
 The line above the matrix gives memory's fill (*traces / capacity*), how many are clamped, what happened to the
 last segment (*stored*, *merged*, *gated*, *rejected (full)*, *frozen*) and how many traces the current echo uses.
@@ -54,6 +59,9 @@ many do.
 - **Selected trace**: its address, age (traces stored since), length, level, strength, generation (0 = heard,
   1+ = an echo that was recorded) and how many segments were merged into it, with **Clamp**/**Unclamp** and
   **Delete** buttons.
+- **Audition** plays the selected trace on its own: the plug-in's output is muted while it plays (running or paused),
+  and returns afterwards. **Loop** repeats it until you press **Stop**. With Sequence Context on, **n−1 | n** plays
+  the segment before it (if that is still in memory) and then the trace. Auditions are never recorded.
 
 ## Memory buttons
 

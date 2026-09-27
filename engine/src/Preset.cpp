@@ -180,6 +180,7 @@ bool isSessionParam (int index)
         case kCapture:
         case kTriggerClampLast: case kTriggerClampAll: case kTriggerUnclampAll:
         case kTriggerClearUnclamped: case kTriggerClearAll:
+        case kRunning:
         case kMemoryBudget: case kEmbedMemory: case kMidiControl: case kMidiChannel: case kMidiBaseNote:
             return true;
         default:

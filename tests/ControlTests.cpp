@@ -369,3 +369,88 @@ TEST_CASE ("Every example and factory preset parses and has a description")
         REQUIRE_FALSE (presetDescription (s.str()).empty());
     }
 }
+
+TEST_CASE ("Pausing leaves memory untouched and passes the dry signal")
+{
+    auto p = freeParams();
+    p.dryLevelDb = 0.0f;
+    p.echoLevelDb = 0.0f;
+    p.decayFadeDb = 3.0f; // forgetting would show if time passed for memory
+    EchoEngine e;
+    e.enableMemoryView();
+    prepare (e, p, 10);
+    run (e, tone (440));
+    run (e, tone (660));
+    run (e, silence (2, 512));
+    const auto before = view (e);
+    REQUIRE (before.count == 2);
+
+    p.running = false;
+    e.setParams (p);
+    run (e, silence (2, 512)); // the pausing block: echo fades out
+    const auto in = tone (880, kSeg * 3);
+    const auto out = run (e, in);
+    // Dry only, sample for sample.
+    double diff = 0.0;
+    for (size_t i = 0; i < in.channels[0].size(); ++i)
+        diff = std::max (diff, static_cast<double> (std::abs (out.channels[0][i] - in.channels[0][i])));
+    REQUIRE (diff < 1.0e-6);
+    const auto during = view (e);
+    REQUIRE (during.count == 2);
+    REQUIRE (during.rows[0].strength == before.rows[0].strength); // no forgetting while paused
+    REQUIRE (e.getStats().paused);
+
+    // Resuming records again.
+    p.running = true;
+    e.setParams (p);
+    run (e, tone (990, kSeg * 2));
+    run (e, silence (2, 512));
+    REQUIRE (e.getStats().tracesStored > 2);
+    REQUIRE_FALSE (e.getStats().paused);
+}
+
+TEST_CASE ("Audition solos one trace, once, looped or as an [n-1 | n] pair")
+{
+    auto p = freeParams();
+    p.dryLevelDb = 0.0f;
+    EchoEngine e;
+    e.enableMemoryView();
+    prepare (e, p, 10);
+    run (e, tone (440));
+    run (e, tone (660));
+    run (e, silence (2, 512));
+    const auto& v = view (e);
+    const uint64_t s440 = v.rows[0].serial, s660 = v.rows[1].serial;
+    p.running = false; // audition works while paused too
+    e.setParams (p);
+    run (e, silence (2, 512));
+
+    // Once: the 660 trace, soloed over a 220 Hz input; then back to the input.
+    e.sendCommand (Command::AuditionTrace, s660);
+    const auto out = run (e, tone (220, kSeg * 2));
+    REQUIRE (correlation (slice (out, 2000, 20000), slice (tone (660), 2000, 20000)) > 0.95);
+    REQUIRE (e.getStats().auditionSerial == 0); // finished
+    REQUIRE (correlation (slice (out, kSeg + 4000, 16000), slice (tone (220, kSeg * 2), kSeg + 4000, 16000)) > 0.95);
+
+    // Loop keeps playing until stopped.
+    e.sendCommand (Command::AuditionLoop, s440);
+    const auto looped = run (e, silence (2, kSeg * 2 + 4000));
+    REQUIRE (rms (slice (looped, kSeg + 2000, kSeg - 4000)) > 0.15);
+    REQUIRE (e.getStats().auditionSerial == s440);
+    e.sendCommand (Command::StopAudition);
+    const auto stopped = run (e, silence (2, 4800));
+    REQUIRE (rms (slice (stopped, 2400, 2400)) < 1.0e-4);
+
+    // Pair: the trace before, then the trace.
+    e.sendCommand (Command::AuditionPair, s660);
+    const auto pair = run (e, silence (2, kSeg * 2));
+    REQUIRE (correlation (slice (pair, 2000, 20000), slice (tone (440), 2000, 20000)) > 0.95);
+    REQUIRE (correlation (slice (pair, kSeg + 2000, 20000), slice (tone (660), 2000, 20000)) > 0.95);
+
+    // Deleting the trace stops its audition.
+    e.sendCommand (Command::AuditionLoop, s660);
+    run (e, silence (2, 2048));
+    e.sendCommand (Command::DeleteTrace, s660);
+    run (e, silence (2, 2048));
+    REQUIRE (e.getStats().auditionSerial == 0);
+}

@@ -57,6 +57,22 @@ MinervaSpaceEchoEditor::MinervaSpaceEchoEditor (MinervaSpaceEchoProcessor& p)
         processor.sendCommand (lock ? mse::Command::ClampTrace : mse::Command::UnclampTrace, serial);
     };
     side.onLock = matrix.onLock;
+    side.onAudition = [this] (uint64_t serial, int mode) {
+        if (serial == 0)
+            processor.sendCommand (mse::Command::StopAudition);
+        else
+            processor.sendCommand (mode == 1 ? mse::Command::AuditionLoop
+                                             : (mode == 2 ? mse::Command::AuditionPair : mse::Command::AuditionTrace),
+                                   serial);
+    };
+    matrix.onAudition = [this] (uint64_t serial) { side.onAudition (serial, 0); };
+
+    // Running / paused.
+    addAndMakeVisible (runButton);
+    runButton.setClickingTogglesState (true);
+    runAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.getParameters(), "running", runButton);
+    runButton.setTooltip ("Paused: memory is left exactly as it is (nothing stored, forgotten or cued), the echo stops and "
+                          "the dry signal passes. You can still inspect, audition, clamp, import and save.");
     side.onDelete = [this] (uint64_t serial) {
         processor.sendCommand (mse::Command::DeleteTrace, serial);
         matrix.setSelected (0);
@@ -308,8 +324,10 @@ void MinervaSpaceEchoEditor::resized()
 
     // Presets in the header, centred-right.
     auto presetRow = header.reduced (0, 8).withTrimmedRight (150);
-    presetRow = presetRow.removeFromRight (juce::jmin (430, presetRow.getWidth() / 2));
+    presetRow = presetRow.removeFromRight (juce::jmin (530, presetRow.getWidth() * 3 / 5));
     savePreset.setBounds (presetRow.removeFromRight (70));
+    runButton.setBounds (presetRow.removeFromLeft (84));
+    presetRow.removeFromLeft (8);
     presetRow.removeFromRight (6);
     nextPreset.setBounds (presetRow.removeFromRight (28));
     prevPreset.setBounds (presetRow.removeFromLeft (28));
@@ -487,6 +505,13 @@ void MinervaSpaceEchoEditor::refresh()
     }
 
     params.updateRelevance();
+    matrix.setAuditioning (st.auditionSerial);
+    side.setAuditioning (st.auditionSerial);
+    runButton.setButtonText (st.paused ? "Paused" : "Running");
+    runButton.setColour (juce::TextButton::buttonOnColourId, theme::head2.withAlpha (0.45f));
+    if (st.paused)
+        clockText = "PAUSED  |  memory untouched, dry signal only   |   " + clockText;
+
     phase = st.segmentPhase;
     repaint (header);
     repaint (matrixCaption);

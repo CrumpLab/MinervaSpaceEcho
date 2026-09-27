@@ -258,8 +258,12 @@ void MemoryMatrix::paint (juce::Graphics& g)
         g.drawRect (r.expanded (0.0f, rowH < 2.0f ? 1.0f : 0.0f), thickness);
     };
     for (int i = 0; i < count; ++i)
+    {
         if (rows[static_cast<size_t> (i)].serial == selected)
             outlineRow (i, theme::text, 1.5f);
+        if (auditioning != 0 && rows[static_cast<size_t> (i)].serial == auditioning)
+            outlineRow (i, theme::head2, 2.0f);
+    }
     if (hoverRow >= 0 && hoverRow < count)
         outlineRow (hoverRow, theme::text.withAlpha (0.35f), 1.0f);
 
@@ -292,6 +296,13 @@ void MemoryMatrix::mouseDown (const juce::MouseEvent& e)
             onLock (r.serial, ! r.clamped);
         return;
     }
+    if (e.mods.isAltDown())
+    {
+        // Alt-click: listen to the trace (again to stop).
+        if (onAudition)
+            onAudition (auditioning == r.serial ? 0 : r.serial);
+        return;
+    }
     selected = selected == r.serial ? 0 : r.serial;
     if (onSelect)
         onSelect (selected);
@@ -320,7 +331,7 @@ juce::String MemoryMatrix::getTooltip()
     if (hoverRow < 0 || hoverRow >= count)
         return {};
     auto text = traceText (rows[static_cast<size_t> (hoverRow)]);
-    text << "\n\nClick to inspect; click the lock column to clamp or unclamp.";
+    text << "\n\nClick to inspect; Alt-click to listen; click the lock column to clamp or unclamp.";
     return text;
 }
 
@@ -340,6 +351,39 @@ MemorySidePanel::MemorySidePanel()
     };
     lockButton.setTooltip ("Clamped (locked) traces are never replaced when memory is full");
     deleteButton.setTooltip ("Remove this trace from memory");
+
+    addChildComponent (auditionButton);
+    addChildComponent (pairButton);
+    addChildComponent (loopToggle);
+    auditionButton.onClick = [this] {
+        if (hasSelection && onAudition)
+            onAudition (auditioning == sel.serial ? 0 : sel.serial, loopToggle.getToggleState() ? 1 : 0);
+    };
+    pairButton.onClick = [this] {
+        if (hasSelection && onAudition)
+            onAudition (sel.serial, 2);
+    };
+    auditionButton.setTooltip ("Listen to this trace on its own (the plug-in's output is muted while it plays). Alt-click a row does the same.");
+    pairButton.setTooltip ("Listen to the segment before this trace (if it is still in memory), then the trace: its [n-1 | n]");
+    loopToggle.setTooltip ("Repeat the audition until stopped");
+}
+
+void MemorySidePanel::setAuditioning (uint64_t serial)
+{
+    if (serial != auditioning)
+    {
+        auditioning = serial;
+        updateAuditionButtons();
+    }
+}
+
+void MemorySidePanel::updateAuditionButtons()
+{
+    auditionButton.setVisible (hasSelection);
+    loopToggle.setVisible (hasSelection);
+    pairButton.setVisible (hasSelection && sequence);
+    auditionButton.setButtonText (hasSelection && auditioning != 0 ? "Stop" : "Audition");
+    auditionButton.setToggleState (hasSelection && auditioning == sel.serial, juce::dontSendNotification);
 }
 
 void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
@@ -366,6 +410,7 @@ void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
         }
     lockButton.setVisible (hasSelection);
     deleteButton.setVisible (hasSelection);
+    updateAuditionButtons();
     lockButton.setButtonText (hasSelection && sel.clamped ? "Unclamp" : "Clamp");
     repaint();
 }
@@ -382,6 +427,12 @@ void MemorySidePanel::resized()
     auto buttons = r.removeFromBottom (26);
     lockButton.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (0, 0).withTrimmedRight (3));
     deleteButton.setBounds (buttons.withTrimmedLeft (3));
+    r.removeFromBottom (4);
+    auto listen = r.removeFromBottom (26);
+    const int third = listen.getWidth() / 3;
+    auditionButton.setBounds (listen.removeFromLeft (third).withTrimmedRight (3));
+    pairButton.setBounds (listen.removeFromRight (third).withTrimmedLeft (3));
+    loopToggle.setBounds (listen.reduced (4, 0));
     r.removeFromBottom (6);
     selArea = r;
 }

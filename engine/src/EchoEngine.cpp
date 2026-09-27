@@ -496,6 +496,8 @@ EngineStats EchoEngine::getStats() const noexcept
     s.windowTooLong = stats.windowTooLong.load (std::memory_order_relaxed);
     s.lastWrite = static_cast<WriteOutcome> (stats.lastWrite.load (std::memory_order_relaxed));
     s.captureArmed = stats.captureArmed.load (std::memory_order_relaxed);
+    s.paused = stats.paused.load (std::memory_order_relaxed);
+    s.auditionSerial = stats.auditionSerial.load (std::memory_order_relaxed);
     return s;
 }
 
@@ -581,6 +583,8 @@ void EchoEngine::adoptPendingStore() noexcept
     lingerCountdown[static_cast<size_t> (freeLinger)] = 2;
     store = std::move (fresh);
     liveStore.store (store.get(), std::memory_order_release);
+    audition.active = false; // its slot numbering is gone
+    audition.solo = 0.0f;
     ++viewStoreEpoch;       // slot numbering changed: redraw every thumbnail
     rolling.active = false; // slot indices refer to the old store
     for (auto& past : history)
@@ -731,6 +735,34 @@ void EchoEngine::runCommand (Command c, uint64_t arg) noexcept
             needResync = true;
             boundaryPending = false;
             break;
+        case Command::AuditionTrace:
+        case Command::AuditionLoop:
+        case Command::AuditionPair:
+        {
+            const int pos = store->positionOfSerial (arg);
+            if (pos < 0 || arg == 0)
+                break;
+            audition.firstSerial = arg;
+            audition.nextSerial = 0;
+            if (c == Command::AuditionPair)
+            {
+                // [n-1 | n]: the segment before it, if that is still in memory.
+                if (store->positionOfSerial (arg - 1) >= 0)
+                {
+                    audition.firstSerial = arg - 1;
+                    audition.nextSerial = arg;
+                }
+            }
+            audition.serial = audition.firstSerial;
+            audition.slot = store->storedSlot (store->positionOfSerial (audition.serial));
+            audition.pos = store->slot (audition.slot).begin;
+            audition.loop = c == Command::AuditionLoop;
+            audition.active = true;
+            break;
+        }
+        case Command::StopAudition:
+            audition.active = false;
+            break;
         case Command::ClampTrace:
         case Command::UnclampTrace:
         case Command::DeleteTrace:
@@ -830,6 +862,75 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
         captureArmed = true; // rising edge of the Capture parameter
     lastCaptureParam = params.capture;
 
+    // Running / paused. Pausing lets this block run with the echo fading
+    // out; after that memory is left untouched and only the dry signal (and
+    // any audition) is heard. Resuming starts cleanly, like a transport start.
+    const bool pausing = ! params.running && ! paused;
+    if (params.running && paused)
+    {
+        paused = false;
+        clearHeads();
+        resetContext();
+        writeIdx = segBegin = 0;
+        segEnergy = echoSegEnergy = cueSegEnergy = 0.0;
+        needResync = true;
+        boundaryPending = false;
+        echoGain = 0.0f; // the echo fades back in
+        springGain = 0.0f;
+    }
+    if (paused)
+        processPaused (io, ioChannels, numSamples);
+    else
+        runMemory (io, ioChannels, numSamples, clock, sidechain, sidechainChannels, pausing);
+    if (pausing)
+        paused = true;
+
+    mixAudition (io, ioChannels, numSamples);
+
+    // Output gain (one-pole smoothed; exact pass-through when settled at unity).
+    const float target = std::pow (10.0f, params.outputGainDb / 20.0f);
+    if (! (target == 1.0f && outGain == 1.0f))
+    {
+        float g = outGain;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            g = target + (g - target) * outSmoothing;
+            for (int c = 0; c < ioChannels; ++c)
+                io[c][i] *= g;
+        }
+        outGain = std::abs (g - target) < 1.0e-6f ? target : g;
+    }
+
+    viewCountdown -= numSamples;
+    if (viewCountdown <= 0)
+    {
+        viewCountdown = static_cast<int64_t> (sampleRate / 30.0);
+        publishView();
+    }
+    stats.paused.store (paused, std::memory_order_relaxed);
+}
+
+void EchoEngine::processPaused (float* const* io, int ioChannels, int numSamples) noexcept
+{
+    const float target = levelToGain (params.dryLevelDb);
+    const float inc = (target - dryGain) / static_cast<float> (numSamples);
+    for (int c = 0; c < ioChannels; ++c)
+    {
+        float g = dryGain;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            io[c][i] *= g;
+            g += inc;
+        }
+    }
+    dryGain = target;
+    echoGain = 0.0f;
+    springGain = springTarget = 0.0f;
+}
+
+void EchoEngine::runMemory (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
+                            const float* const* sidechain, int sidechainChannels, bool fadeOut) noexcept
+{
     fadeSamples = static_cast<int64_t> (std::llround (params.edgeFadeMs * 0.001 * sampleRate));
 
     const double nominal = nominalLength (clock);
@@ -883,7 +984,7 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
     // Per-block linear gain ramps.
     const float n = static_cast<float> (numSamples);
     dryInc = (levelToGain (params.dryLevelDb) - dryGain) / n;
-    echoInc = (levelToGain (params.echoLevelDb) - echoGain) / n;
+    echoInc = ((fadeOut ? 0.0f : levelToGain (params.echoLevelDb)) - echoGain) / n;
     {
         HeadMode modes[kNumHeads];
         float target[kNumHeads];
@@ -919,7 +1020,7 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
     eqTrebleDb += std::clamp (params.feedbackTrebleDb - eqTrebleDb, -0.25f, 0.25f);
     feedbackEq.set (eqBassDb, eqTrebleDb);
     feedbackEqActive = ! feedbackEq.isFlat();
-    const float newSpringGain = levelToGain (params.springLevelDb);
+    const float newSpringGain = fadeOut ? 0.0f : levelToGain (params.springLevelDb);
     if (newSpringGain > 0.0f && springGain <= 0.0f)
         spring.reset(); // start from silence, not an old tail
     springTarget = newSpringGain;
@@ -980,34 +1081,13 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
         boundaryPending = true; // segment ended exactly on the block edge
 
     dryGain = levelToGain (params.dryLevelDb);
-    echoGain = levelToGain (params.echoLevelDb);
+    echoGain = fadeOut ? 0.0f : levelToGain (params.echoLevelDb);
     springGain = springTarget;
     fbGain = feedbackNow;
     driveMix = std::round (driveMix); // settles exactly at 0 or 1
     {
         HeadMode modes[kNumHeads];
         effectiveHeads (modes, headGainNow);
-    }
-
-    // Output gain (one-pole smoothed; exact pass-through when settled at unity).
-    const float target = std::pow (10.0f, params.outputGainDb / 20.0f);
-    if (! (target == 1.0f && outGain == 1.0f))
-    {
-        float g = outGain;
-        for (int i = 0; i < numSamples; ++i)
-        {
-            g = target + (g - target) * outSmoothing;
-            for (int c = 0; c < ioChannels; ++c)
-                io[c][i] *= g;
-        }
-        outGain = std::abs (g - target) < 1.0e-6f ? target : g;
-    }
-
-    viewCountdown -= numSamples;
-    if (viewCountdown <= 0)
-    {
-        viewCountdown = static_cast<int64_t> (sampleRate / 30.0);
-        publishView();
     }
 
     stats.traceSeconds.store (nominal / sampleRate, std::memory_order_relaxed);
@@ -1348,6 +1428,7 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
                 if (w <= 0.0f)
                     liveCueRms = -1.0f; // no level to track: the chain runs on its own
             }
+            addCueNoise (cue);
             applyContextCue (rs, cue, prevCue);
             prevCue = cue;
             const auto result = gated ? RetrievalResult {} : retrieve (contextProbeCurrent, *store, rs, weights.data());
@@ -1357,9 +1438,21 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
             installMain (result, liveCueRms, newBegin, fadeSamples, newBegin > 0 ? fadeSamples : 0);
             updateOtherHeads (mainTracking, newBegin);
 
-            // The chain's next step: what memory expects next.
+            if (! held)
+                updateHabituation();
+
+            // The chain's next step: what memory expects next, either the
+            // blend of every answering trace or one of them, drawn by
+            // activation (a random walk through memory).
             chainValid = params.cueSource == CueSource::EchoChain && headWeightCount[0] > 0;
-            if (chainValid)
+            if (chainValid && params.chainStep == ChainStep::Sample)
+            {
+                const int pick = sampleChainTrace();
+                chainValid = pick >= 0;
+                if (chainValid)
+                    chainState = store->slot (pick).features;
+            }
+            else if (chainValid)
                 echoAddress (headWeights[0].data(), headWeightCount[0], *store, params.featureMode,
                              params.ternaryThreshold, chainState);
         }
@@ -1398,6 +1491,64 @@ void EchoEngine::boundary (int64_t newBegin, double newNominal) noexcept
     recordEchoToo = params.recordSource == RecordSource::InputAndEcho && current.count > 0;
 
     publishStats();
+}
+
+void EchoEngine::addCueNoise (FeatureVector& cueVec) noexcept
+{
+    // Gaussian noise (in feature units, i.e. standard deviations) on the
+    // features the cue has; unencoded (0) features stay unencoded.
+    if (params.cueNoise <= 0.0f)
+        return;
+    for (size_t j = 0; j < cueVec.size(); j += 2)
+    {
+        const float u1 = std::max (1.0e-7f, random01()), u2 = random01();
+        const float r = params.cueNoise * std::sqrt (-2.0f * std::log (u1));
+        const float z0 = r * std::cos (6.2831853f * u2), z1 = r * std::sin (6.2831853f * u2);
+        if (cueVec[j] != 0.0f)
+            cueVec[j] += z0;
+        if (j + 1 < cueVec.size() && cueVec[j + 1] != 0.0f)
+            cueVec[j + 1] += z1;
+    }
+}
+
+void EchoEngine::updateHabituation() noexcept
+{
+    // Traces that just answered tire, and recover by half each segment.
+    if (params.habituation <= 0.0f)
+        return;
+    for (int i = 0; i < store->size(); ++i)
+        store->slot (store->storedSlot (i)).fatigue *= 0.5f;
+    float maxW = 0.0f;
+    for (int i = 0; i < current.count; ++i)
+        maxW = std::max (maxW, std::abs (current.entries[static_cast<size_t> (i)].weight));
+    if (maxW <= 0.0f)
+        return;
+    for (int i = 0; i < current.count; ++i)
+    {
+        const auto& e = current.entries[static_cast<size_t> (i)];
+        if (store->positionOf (e.slot) < 0)
+            continue;
+        auto& f = store->slot (e.slot).fatigue;
+        f = std::min (0.95f, f + params.habituation * std::abs (e.weight) / maxW);
+    }
+}
+
+int EchoEngine::sampleChainTrace() noexcept
+{
+    // Sample playback: the trace being played is the one that steers.
+    if (params.playback == Playback::Sample && current.count > 0)
+        return current.entries[0].slot;
+    // Otherwise draw one of the answering traces, in proportion to activation.
+    double total = 0.0;
+    for (int i = 0; i < headWeightCount[0]; ++i)
+        total += std::abs (headWeights[0][static_cast<size_t> (i)].activation);
+    if (total <= 0.0)
+        return -1;
+    double r = random01() * total;
+    for (int i = 0; i < headWeightCount[0]; ++i)
+        if ((r -= std::abs (headWeights[0][static_cast<size_t> (i)].activation)) <= 0.0)
+            return headWeights[0][static_cast<size_t> (i)].slot;
+    return headWeights[0][static_cast<size_t> (headWeightCount[0] - 1)].slot;
 }
 
 void EchoEngine::applyContextCue (RetrievalSettings& rs, const FeatureVector& now, const FeatureVector& before) noexcept
@@ -1441,6 +1592,7 @@ RetrievalSettings EchoEngine::retrievalSettings() const noexcept
     rs.normalization = params.normalization;
     rs.focus = params.featureFocus;
     rs.recency = params.recency;
+    rs.habituation = params.habituation > 0.0f;
     return rs;
 }
 
@@ -1684,6 +1836,7 @@ void EchoEngine::updateOtherHeads (float tracking, int64_t pos) noexcept
                          *store, params.featureMode, params.ternaryThreshold, iterCue);
             // With sequence context the same rule applies: Predict Next plays
             // what follows the previous head's echo, and so on down the heads.
+            addCueNoise (iterCue);
             FeatureVector iterBefore {};
             if (params.sequenceContext && params.contextCue == ContextCue::MatchBoth)
                 echoAddress (headWeights[static_cast<size_t> (from)].data(), headWeightCount[static_cast<size_t> (from)],
@@ -1762,6 +1915,7 @@ void EchoEngine::progressiveUpdate (int k) noexcept
 
     // The bar so far, compared with the same stretch of every stored trace.
     cueFx().finalize (partialProbe, { params.featureMode, params.ternaryThreshold });
+    addCueNoise (partialProbe);
     const float cueRms = static_cast<float> (std::sqrt (cueSegEnergy / static_cast<double> (recorded)));
     const auto smooth = static_cast<int64_t> (std::llround (params.cueSmoothingMs * 0.001 * sampleRate));
     if (params.cueGateDb > kCueGateOffDb && toDb (cueRms) < params.cueGateDb)
@@ -2366,6 +2520,57 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
     if (recordEchoToo)
         echoFeatures.push (echoMonoBuf.data(), len, writeIdx);
     writeIdx += len;
+}
+
+void EchoEngine::mixAudition (float* const* io, int ioChannels, int numSamples) noexcept
+{
+    if (! audition.active && audition.solo <= 0.0f)
+        return;
+    // The trace must still be the one we started (it may have been replaced).
+    if (audition.active && (audition.slot < 0 || store->slot (audition.slot).serial != audition.serial))
+        audition.active = false;
+
+    const float soloStep = 1.0f / std::max (1.0f, static_cast<float> (0.01 * sampleRate)); // 10 ms crossfade
+    const int storeCh = store->numChannels();
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float x[kMaxChannels] {};
+        if (audition.active)
+        {
+            const auto& t = store->slot (audition.slot);
+            const int64_t fade = std::max<int64_t> (1, std::min<int64_t> (static_cast<int64_t> (0.005 * sampleRate),
+                                                                          (t.end - t.begin) / 4));
+            if (audition.pos >= t.end)
+            {
+                // Next in the pair, back to the start (loop), or done.
+                const uint64_t next = audition.nextSerial != 0 && audition.serial != audition.nextSerial
+                                          ? audition.nextSerial
+                                          : (audition.loop ? audition.firstSerial : 0);
+                const int pos = next != 0 ? store->positionOfSerial (next) : -1;
+                if (pos < 0)
+                    audition.active = false;
+                else
+                {
+                    audition.serial = next;
+                    audition.slot = store->storedSlot (pos);
+                    audition.pos = store->slot (audition.slot).begin;
+                }
+            }
+            if (audition.active)
+            {
+                const auto& tr = store->slot (audition.slot);
+                const float g = std::min ({ 1.0f, static_cast<float> (audition.pos - tr.begin + 1) / static_cast<float> (fade),
+                                            static_cast<float> (tr.end - audition.pos) / static_cast<float> (fade) });
+                for (int c = 0; c < ioChannels; ++c)
+                    x[c] = g * tr.audio[std::min (c, storeCh - 1)][audition.pos];
+                ++audition.pos;
+            }
+        }
+        audition.solo = std::clamp (audition.solo + (audition.active ? soloStep : -soloStep), 0.0f, 1.0f);
+        for (int c = 0; c < ioChannels; ++c)
+            io[c][i] = io[c][i] * (1.0f - audition.solo) + x[c] * audition.solo;
+    }
+    stats.auditionSerial.store (audition.active ? audition.serial : 0, std::memory_order_relaxed);
 }
 
 void EchoEngine::publishView() noexcept

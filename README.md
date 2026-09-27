@@ -12,7 +12,7 @@ Brooklyn College of CUNY.
 **Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: version 0.2.0.** Every stage of the plan is built (see
+**Status: version 0.3.0.** Every stage of the plan is built (see
 [`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
 
 The plugin cuts the input into traces
@@ -90,6 +90,8 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Feature Focus** | Match on everything, on Rhythm only (loudness over time), or on Timbre only (average spectrum). Applies to Segment and Progressive cueing. |
 | **Recency** | Favour recently stored traces (0 = no preference). |
 | **Sequence Context** / **Context Cue** / **Context Weight** | Traces store the previous segment's address too, [n−1 \| n]. **Predict Next** matches the segment just played against traces' n−1 halves, so you hear what came next last time; **Match Both** recalls the trace matching the last two segments; **Current Only** ignores context. Context Weight sets how much n−1 counts in Match Both. |
+| **Chain Step** / **Cue Noise** / **Habituation** | How the chain wanders: **Sample** steps to one answering trace drawn by activation (a random walk through memory), **Blend** to the echo's blended content (deterministic). Cue Noise adds noise to every cue; Habituation makes traces that just answered briefly less active. |
+| **Running** | Paused: memory untouched, echo off, dry passes; audition still works. |
 | **Chain Input** | With Cue Source = **Echo Chain**, each echo's expected next segment cues the next echo. 0: memory walks its sequences on its own; 1: the input steers it (= Predict Next). |
 | **Mode Selector** | The RE-201's head combinations: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3 (delay heads), Iterative 1+2+3, or Custom (use the per-head settings). |
 | **Head 1–3 Level / Pan**, **Head 2 / Head 3** | Head 1 is the main echo. A **Delay** head replays what head 1 played 1 (head 2) or 2 (head 3) segments earlier, like tape heads further along. An **Iterative** head is cued by the previous head's echo (the echo of the echo), drifting toward memory's prototype. Heads 2–3 update at bar lines (not in Rolling mode). |
@@ -138,7 +140,11 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 - **Familiarity**. The strongest activation (how well memory recognised the
   cue) and MINERVA's intensity (the sum of activations).
 - **Selected trace**. Its address, age, length, level, strength, generation
-  (heard or echo) and merges, with **Clamp** and **Delete** buttons.
+  (heard or echo) and merges, with **Clamp** and **Delete** buttons, and
+  **Audition** (soloed; **Loop**; **n−1 | n** plays the segment before it
+  first). Alt-click a row to audition it.
+- **Running / Paused** (header): pause to leave memory untouched while you
+  inspect and audition it.
 - **Buttons**: **Capture**, **Clamp Last**, **Clamp All**, **Unclamp All**,
   **Clear Unclamped**, **Clear All**, **Import Audio…**, **Save Memory…**,
   **Load Memory…**, and **Clamp imports**.
@@ -293,7 +299,7 @@ This is experimental software, written with help from [Claude Code](https://clau
 
 GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
 
-> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.2.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.3.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 

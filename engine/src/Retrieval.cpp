@@ -73,6 +73,8 @@ RetrievalResult finishRetrieval (const TraceStore& store, const RetrievalSetting
         auto& w = out[i];
         const auto& trace = store.slot (w.slot);
         float a = activation (w.activation, settings.power) * trace.strength;
+        if (settings.habituation)
+            a *= 1.0f - trace.fatigue;
         if (settings.recency > 0.0f)
         {
             const auto age = static_cast<float> (store.currentSerial() - std::min (store.currentSerial(), trace.serial + 1));

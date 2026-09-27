@@ -17,6 +17,8 @@ const char* const kSourceChoices[] = { "Input", "Echo", "Input + Echo" };
 const char* const kCueModeChoices[] = { "Segment", "Progressive", "Rolling" };
 const char* const kCueSourceChoices[] = { "Input", "Sidechain", "Random", "Frozen", "Echo Chain" };
 const char* const kContextCueChoices[] = { "Match Both", "Predict Next", "Current Only" };
+const char* const kChainStepChoices[] = { "Blend", "Sample" };
+const char* const kRunChoices[] = { "Paused", "Running" };
 const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
 const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
 const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
@@ -87,6 +89,9 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "context_cue",        "Context Cue",           ParamType::Choice, 0,    2,      1,     0,    "",       CHOICE (kContextCueChoices),   true },
     { "context_weight",     "Context Weight",        ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
     { "chain_input",        "Chain Input",           ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "chain_step",         "Chain Step",            ParamType::Choice, 0,    1,      1,     0,    "",       CHOICE (kChainStepChoices),    true },
+    { "cue_noise",          "Cue Noise",             ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
+    { "habituation",        "Habituation",           ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     // heads
     { "mode_selector",      "Mode Selector",         ParamType::Choice, 0,    8,      0,     0,    "",       CHOICE (kSelectorChoices),     true },
     { "head1_level_db",     "Head 1 Level",          ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
@@ -139,6 +144,8 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "dry_level_db",       "Dry Level",             ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
     { "edge_fade_ms",       "Edge Fade",             ParamType::Float,  0,    50,     5,     0,    "ms",     NOCHOICE,                      true },
     { "output_gain_db",     "Output Gain",           ParamType::Float,  -60,  12,     0,     0,    "dB",     NOCHOICE,                      true },
+    // running / paused
+    { "running",            "Running",               ParamType::Bool,   0,    1,      1,     0,    "",       CHOICE (kRunChoices),          true },
     // plugin
     { "embed_memory",       "Save Memory With Set",  ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         false },
     { "midi_control",       "MIDI Note Control",     ParamType::Bool,   0,    1,      1,     0,    "",       CHOICE (kBoolChoices),         false },
@@ -238,6 +245,10 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.contextCue = static_cast<ContextCue> (idx (kContextCue));
     p.contextWeight = v (kContextWeight);
     p.chainInput = v (kChainInput);
+    p.chainStep = static_cast<ChainStep> (idx (kChainStep));
+    p.cueNoise = v (kCueNoise);
+    p.habituation = v (kHabituation);
+    p.running = on (kRunning);
 
     p.modeSelector = static_cast<ModeSelector> (idx (kModeSelector));
     p.headLevelDb[0] = v (kHead1LevelDb);

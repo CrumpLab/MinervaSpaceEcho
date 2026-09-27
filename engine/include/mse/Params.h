@@ -25,6 +25,7 @@ enum class FeatureFocus { Full, Rhythm, Timbre };
 enum class LengthMismatch { Varispeed, Cut, Loop, Stretch };
 enum class BlendDomain { Waveform, Spectral };
 enum class ContextCue { MatchBoth, PredictNext, CurrentOnly };
+enum class ChainStep { Blend, Sample };
 
 // RE-201-style head combinations. Custom uses the per-head settings.
 enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
@@ -93,6 +94,12 @@ struct EngineParams
     ContextCue contextCue = ContextCue::PredictNext;
     float contextWeight = 1.0f;                        // Match Both: weight of the n-1 half
     float chainInput = 0.0f;                           // Echo Chain: how much the live input steers the chain
+    ChainStep chainStep = ChainStep::Sample;           // Echo Chain: next cue from the blend, or from one sampled trace
+    float cueNoise = 0.0f;                             // noise added to every cue (sd, in feature units)
+    float habituation = 0.0f;                          // traces that just answered are briefly less active
+
+    // running / paused: paused = memory untouched, no echo, dry passes
+    bool running = true;
 
     // heads (plan §4.3)
     ModeSelector modeSelector = ModeSelector::Custom;
@@ -176,7 +183,7 @@ enum ParamIndex
     kEncodingFailure, kContentDropout, kDecayForget, kDecayFadeDb, kWearTone,
     kCueMode, kProgressiveStart, kRollingWindowMs, kRollingIntervalMs, kLookaheadMs, kCueSmoothingMs,
     kCueSource, kFeatureFocus, kRecency,
-    kSequenceContext, kContextCue, kContextWeight, kChainInput,
+    kSequenceContext, kContextCue, kContextWeight, kChainInput, kChainStep, kCueNoise, kHabituation,
     kModeSelector, kHead1LevelDb, kHead1Pan, kHead2Mode, kHead2LevelDb, kHead2Pan, kHead3Mode, kHead3LevelDb, kHead3Pan,
     kPlayback, kVoices, kVoiceSpread, kVoiceDetune, kVoiceDelayMs,
     kEchoToneHz, kIntensityToTone, kIntensityToFeedback,
@@ -186,6 +193,7 @@ enum ParamIndex
     kSpringLevelDb, kSpringDecay, kSpringOnDry,
     kBlendDomain, kSpectralVoices, kSpectralFreeze, kMaxActive,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,
+    kRunning,
     kEmbedMemory, kMidiControl, kMidiChannel, kMidiBaseNote,
     kNumParams
 };

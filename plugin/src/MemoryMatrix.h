@@ -27,6 +27,9 @@ public:
 
     std::function<void (uint64_t serial)> onSelect;
     std::function<void (uint64_t serial, bool lock)> onLock;
+    std::function<void (uint64_t serial)> onAudition; // Alt-click on a row
+
+    void setAuditioning (uint64_t serial) { if (serial != auditioning) { auditioning = serial; repaint(); } }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -51,6 +54,7 @@ private:
     uint64_t selected = 0;
     int hoverRow = -1;
     bool sequence = false; // rows show [n-1 | n]
+    uint64_t auditioning = 0;
 };
 
 // Beside the matrix: what cued memory, what came back, how familiar it was,
@@ -64,11 +68,19 @@ public:
 
     std::function<void (uint64_t serial, bool lock)> onLock;
     std::function<void (uint64_t serial)> onDelete;
+    // mode: 0 once, 1 loop, 2 [n-1 | n] pair; serial 0 = stop
+    std::function<void (uint64_t serial, int mode)> onAudition;
+
+    void setAuditioning (uint64_t serial);
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
+    uint64_t auditioning = 0;
+    juce::TextButton auditionButton { "Audition" }, pairButton { "n-1 | n" };
+    juce::ToggleButton loopToggle { "Loop" };
+    void updateAuditionButtons();
     mse::FeatureVector heard {}, echo {}, heardBefore {}, echoContext {};
     bool hasEcho = false, sequence = false, predicting = false;
     float intensity = 0.0f, maxActivation = 0.0f, intensityShown = 0.0f;

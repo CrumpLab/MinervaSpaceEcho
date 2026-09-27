@@ -1,6 +1,6 @@
-# Echo Chain, free-running: from bar 8 each echo's expected next bar cues the
-# next echo, and the input is ignored. Memory replays style A as a sequence of
-# its own while style B plays in (echo only).
+# Echo Chain, free-running: from bar 8 each step plays one remembered bar,
+# drawn by how well its context matches the last, and that bar cues the next.
+# Memory walks through style A on its own while style B plays in (echo only).
 sequence_context = on
 context_cue = Predict Next
 capacity = 100
@@ -9,3 +9,6 @@ dry_level_db = -60
 @8 freeze = on
 @8 cue_source = Echo Chain
 @8 chain_input = 0
+@8 chain_step = Sample
+@8 playback = Sample
+@8 habituation = 0.4

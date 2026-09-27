@@ -52,7 +52,7 @@ or draw it as automation, in both formats:
 | **Clear Unclamped (Trigger)** | Clear Unclamped |
 | **Clear All (Trigger)** | Clear All |
 
-Each fires once on the change from off to on; switch it off again to re-arm. **Freeze Memory**,
+Each fires once on the change from off to on; switch it off again to re-arm. **Running** (pause), **Freeze Memory**,
 **Spectral Freeze** and **Mode Selector** are ordinary parameters and map the same way.
 
 All continuous parameters glide when they change, so automation doesn't click. **Memory Capacity** and

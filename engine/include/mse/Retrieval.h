@@ -30,6 +30,7 @@ struct RetrievalSettings
     // similarity is the weighted mean of the two:
     //   S = (contextWeight * S_context + currentWeight * S_current) / (contextWeight + currentWeight)
     // With contextWeight = 0 (the default) retrieval is exactly MINERVA II.
+    bool habituation = false; // activation *= (1 - trace.fatigue)
     const FeatureVector* contextProbe = nullptr;
     float contextWeight = 0.0f;
     float currentWeight = 1.0f;

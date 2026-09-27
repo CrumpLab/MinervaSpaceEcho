@@ -61,14 +61,36 @@ time.
 The chain starts from the last segment you played. If memory stops answering (it's empty, or nothing is similar),
 it restarts from the input. Hold MIDI note *base + 8* to switch to the chain while the note is down.
 
-Other settings shape the walk: a high **Activation Power** makes it follow the most expected path, a low one blends
-possible continuations, and **Playback = Sample** makes it a random walk that picks one continuation at each step.
+### How each step is chosen
+
+**Chain Step** decides what cues the next step:
+
+- **Sample** (default): one of the traces that answered is drawn, in proportion to its activation, and *its* n half
+  cues the next step. This is a random walk through memory whose transition probabilities come from the learned
+  sequences: after a segment that was followed by B half the time and C half the time, the walk goes to B or C.
+  With **Playback = Sample** the trace drawn is the trace you hear, so you hear the walk itself.
+- **Blend**: the echo's blended content cues the next step. It is deterministic, and because a blend drifts toward
+  the average of what answered, it tends to settle on a prototype and repeat it, or on a short loop.
+
+**Activation Power** acts like a temperature: high values make the walk follow the most expected continuation, low
+values let weaker continuations through.
+
+### Getting out of ruts
+
+Music with repeated bars teaches memory that "the next bar is like this one", so a walk can keep returning to the
+same place. Two controls help:
+
+- **Cue Noise** adds random noise to every cue (the chain's and the live input's), so the walk sometimes lands
+  somewhere nearby instead.
+- **Habituation** makes traces that just answered less active for a few segments (their fatigue halves each
+  segment), so the walk moves on, like inhibition of return.
+
 **Freeze Memory** keeps the chain from recording its own output.
 
 ## Try it
 
 - **22 Anticipate** (Predict Next), **23 Sequence Memory** (Match Both) and **24 Dreaming Sequencer**
-  (Echo Chain) in the preset menu.
+  (Echo Chain with sampled steps, habituation and a little cue noise) in the preset menu.
 - The listening examples **34** to **37**.
 
 ## References

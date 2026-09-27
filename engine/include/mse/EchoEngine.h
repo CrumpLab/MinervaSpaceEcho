@@ -53,6 +53,8 @@ struct EngineStats
     bool windowTooLong = false;   // Rolling: traces are too short to search with this window
     WriteOutcome lastWrite = WriteOutcome::None;
     bool captureArmed = false;
+    bool paused = false;           // Running = off
+    uint64_t auditionSerial = 0;   // trace being auditioned (0 = none)
 };
 
 // Actions sent from the UI (or any single producer thread) to the audio thread.
@@ -68,6 +70,10 @@ enum class Command
     ClampTrace,       // respects the clamp budget
     UnclampTrace,
     DeleteTrace,
+    AuditionTrace,      // play one trace soloed, once
+    AuditionLoop,       // ... looping until stopped
+    AuditionPair,       // the trace before it (if still in memory), then the trace: [n-1 | n]
+    StopAudition,
 };
 
 // The MINERVA echo (plan §3 Mode A, §5 memory management):
@@ -165,9 +171,16 @@ private:
     // audio thread helpers
     void processBlock (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
                        const float* const* sidechain, int sidechainChannels) noexcept; // numSamples <= maxBlockSize
+    void runMemory (float* const* io, int ioChannels, int numSamples, const HostClock& clock,
+                    const float* const* sidechain, int sidechainChannels, bool fadeOut) noexcept;
+    void processPaused (float* const* io, int ioChannels, int numSamples) noexcept;
+    void mixAudition (float* const* io, int ioChannels, int numSamples) noexcept;
     void resetPlayback() noexcept;
     void clearHeads() noexcept;
     void resetContext() noexcept;
+    void addCueNoise (FeatureVector& cue) noexcept;
+    void updateHabituation() noexcept;
+    int sampleChainTrace() noexcept;
     void adoptPendingStore() noexcept;
     void processCommands() noexcept;
     void runCommand (Command c, uint64_t arg) noexcept; // inside a mutation
@@ -367,6 +380,21 @@ private:
     int64_t fadeSamples = 0;
     bool captureArmed = false;
     bool lastCaptureParam = false;
+    bool paused = false;
+
+    // audition (a trace soloed for listening)
+    struct Audition
+    {
+        uint64_t serial = 0;       // trace playing (0 = none)
+        uint64_t nextSerial = 0;   // pair mode: the trace to play after this one
+        uint64_t firstSerial = 0;  // loop restarts here
+        int slot = -1;
+        int64_t pos = 0;
+        bool loop = false;
+        bool active = false;
+        float solo = 0.0f;         // 0 = normal output .. 1 = audition only
+    } audition;
+    std::vector<float> auditionBuf[kMaxChannels];
     bool lastTrigger[EngineParams::kNumTriggers] {};
 
     // memory view (triple buffer: the audio thread fills `viewBack`, then swaps
@@ -400,6 +428,8 @@ private:
         std::atomic<int> cueMode { 0 };
         std::atomic<bool> windowTooLong { false };
         std::atomic<bool> captureArmed { false };
+        std::atomic<bool> paused { false };
+        std::atomic<uint64_t> auditionSerial { 0 };
     } stats;
 };
 

@@ -1,9 +1,15 @@
-# Echo Chain: each echo's expectation of what comes next cues the next echo, so
-# memory walks through the sequences it has learned. Raise Chain Input to steer
-# it with your playing; at 0 it plays on its own (hold MIDI base note + 8).
+# Echo Chain: each step plays one trace, drawn by how well its context matches
+# what was just played, and that trace cues the next, so memory walks through
+# the sequences it has learned. Habituation and a little cue noise keep it from
+# getting stuck; raise Chain Input to steer it with your playing (hold MIDI base
+# note + 8 to switch the chain on).
 sequence_context = on
 cue_source = Echo Chain
-chain_input = 0.3
+chain_step = Sample
+playback = Sample
+chain_input = 0
+habituation = 0.4
+cue_noise = 0.15
 capacity = 100
-power = 9
+power = 6
 echo_level_db = -4

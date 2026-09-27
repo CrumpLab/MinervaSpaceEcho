@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0] - 2026-09-27
+
+- **Running / Paused** (header button and parameter): pausing leaves memory
+  untouched (nothing stored, forgotten or cued), fades the echo out and
+  passes the dry signal. Resuming starts cleanly at the next segment.
+- **Audition**: listen to a trace on its own (side panel, or Alt-click a
+  row), soloed over the plug-in's output, running or paused; **Loop**; and
+  **n−1 | n** to hear the segment before it first. Never recorded.
+- **Chain Step**: **Sample** (new default) steps the echo chain to one
+  answering trace drawn by activation, a random walk through memory that
+  follows learned transitions; **Blend** keeps the previous deterministic
+  behaviour. Fixes Playback = Sample not affecting the walk.
+- **Cue Noise**: noise on every cue (live, chain, iterative, progressive).
+- **Habituation**: traces that just answered are briefly less active.
+- *Dreaming Sequencer* and example 36 use the sampled walk.
+
 ## [0.2.0] - 2026-09-27
 
 ### Stage 9: sequential context

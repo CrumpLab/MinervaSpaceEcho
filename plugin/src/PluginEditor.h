@@ -60,6 +60,8 @@ private:
         unclampButton { "Unclamp All" }, clearUnclampedButton { "Clear Unclamped" }, clearButton { "Clear All" },
         importButton { "Import Audio..." }, saveButton { "Save Memory..." }, loadButton { "Load Memory..." };
     juce::ToggleButton lockImports { "Clamp imports" };
+    juce::TextButton runButton { "Running" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> runAttachment;
 
     juce::Rectangle<int> header, matrixCaption, matrixArea, statusArea;
     juce::String memoryText, clockText, message;
