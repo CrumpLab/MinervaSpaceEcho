@@ -1,0 +1,82 @@
+---
+title: "The plug-in window"
+---
+
+![](../images/screenshot.png){fig-alt="The plug-in window."}
+
+The window has five areas: the header, the memory matrix, the side panel, the memory buttons, and the
+parameter pages, with a status bar along the bottom. It can be resized from the bottom-right corner.
+
+## Header
+
+The preset menu with **<** and **>** to step through presets, and **Save…** to save your own
+([Presets](presets.qmd)). On the right, the **MIDI** light flashes when a note arrives, and the version number.
+
+## Memory matrix
+
+One row per stored trace, **oldest at the top**. From left to right:
+
+| Column | Shows |
+|---|---|
+| **Lock** | An amber lock if the trace is **clamped**. Click here to clamp or unclamp it. |
+| **Activation** | How strongly the trace answered the last cue: amber for positive, blue for negative, scaled to the strongest. |
+| **Heads 1 2 3** | Which playback heads are playing the trace right now (1 amber, 2 teal, 3 violet); brighter = louder. |
+| **Address** | The trace's 384-number address exactly as MINERVA stores it: 16 time slots, left to right, each a 24-band spectrum from low to high. Amber is above the trace's average level, blue below. |
+
+Rows are tall while memory is nearly empty and shrink as it fills, so the view always fits; the space below the
+last row stands for free slots. With more traces than pixels (grain memories), each pixel row shows the
+strongest of the traces it covers.
+
+Hover over a row for its details. **Click** a row to inspect it in the side panel; click again to deselect.
+
+The line above the matrix gives memory's fill (*traces / capacity*), how many are clamped, what happened to the
+last segment (*stored*, *merged*, *gated*, *rejected (full)*, *frozen*) and how many traces the current echo uses.
+
+::: {.callout-tip}
+## Reading the matrix
+Repeated material shows up as rows with similar stripes. When you play something familiar, the activation bars
+light up on the rows that resemble it; with **Activation Power** high, only one or two light up; with it low,
+many do.
+:::
+
+## Side panel
+
+- **Heard**: the address of the last segment you played, which is what cued memory. Time runs left to right,
+  low bands at the bottom.
+- **Echo**: the echo's content, the activation-weighted blend of the answering traces' addresses (MINERVA's
+  echo). Compare it with *Heard* to see how memory reinterpreted what you played.
+- **Familiarity**: the strongest activation, as a bar, and MINERVA's **intensity** (the sum of activations).
+- **Selected trace**: its address, age (traces stored since), length, level, strength, generation (0 = heard,
+  1+ = an echo that was recorded) and how many segments were merged into it, with **Clamp**/**Unclamp** and
+  **Delete** buttons.
+
+## Memory buttons
+
+| Button | Does |
+|---|---|
+| **Capture** | Store the segment in progress when it ends, even if gates or freeze would skip it. |
+| **Clamp Last** | Clamp the newest trace. |
+| **Clamp All** | Clamp the newest traces, up to the **Clamp Budget**. |
+| **Unclamp All** | Unclamp everything. |
+| **Clear Unclamped** | Forget every unclamped trace. |
+| **Clear All** | Empty memory. |
+| **Import Audio…** | Add audio files to memory as traces (or drop files on the window). |
+| **Save Memory…** / **Load Memory…** | Save memory as a folder of WAVs plus a manifest, or load one. |
+| **Clamp imports** | Clamp imported traces. |
+
+See [Importing and saving memory](import-save.qmd).
+
+## Parameter pages
+
+**Main** gathers the essentials; the other pages hold everything else: **Memory**, **Forgetting**,
+**Retrieval**, **Cueing**, **Heads**, **Tape**, **Spectral**, **Mix** and **Control** (MIDI and the trigger
+parameters). Every parameter is described in the [parameter reference](../reference/parameters.qmd).
+
+Controls that have no effect with the current settings are dimmed (for example **Trace Length (Free)** while
+**Sync** is Tempo). Double-click a knob to reset it to its default.
+
+## Status bar
+
+A progress bar through the current segment, then the trace length, the host tempo and bar, the longest trace a
+memory slot can hold, and counts of evictions and merges. In Rolling cue mode it shows how far behind the live
+cue is. Messages from imports, saves and presets appear here for a few seconds.

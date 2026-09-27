@@ -1,0 +1,38 @@
+---
+title: "Spectral engine"
+---
+
+## Blending as spectra
+
+With **Blend Domain = Waveform** (default) the echo adds up the traces' audio. That's exact, but two memories
+that aren't aligned in time can cancel or comb-filter each other; the lower the **Activation Power**, the more
+memories blend and the more it happens.
+
+With **Blend Domain = Spectral** the echo is built from short-time spectra instead: for every ~43 ms frame, each
+active memory's magnitude spectrum is weighted by its activation and summed, and every frequency takes the phase
+of the memory that is loudest there. Memories blend without cancelling (two opposite-phase copies of a tone,
+which cancel completely as waveforms, add up spectrally). With a single memory the result is identical to the
+waveform echo.
+
+- **Spectral Voices** (1–32): how many of the most active memories are analysed per frame. Fewer is cheaper and
+  clearer.
+- Frames are about 43 ms long, so changes in the echo fade in over about that time. There is no added latency.
+- In spectral mode, voice detune, wow/flutter and Loop are ignored.
+- It costs more CPU: roughly 3–4 % of one core per instance, against well under 1 % for waveform blending.
+
+## Spectral freeze
+
+**Spectral Freeze** holds the echo's current spectrum as a drone. Its partials keep turning at their measured
+frequencies (with a little jitter so it doesn't sound static), so it keeps its pitch even after memory is cleared.
+Hold MIDI note *base + 2* to freeze while the note is down.
+
+## Stretch
+
+**Length Mismatch = Stretch** plays traces recorded at another length through a phase vocoder, so they fit the
+new length without changing pitch. It uses the spectral engine even when Blend Domain is Waveform.
+
+## Grain memories
+
+Set **Sync** to Free and **Trace Length (Free)** to 15–50 ms, raise **Memory Capacity** into the thousands and
+turn **Self Match** off: every grain is answered by the most similar earlier grains, a granular cloud that follows
+what you play. **Max Active Traces** keeps it affordable. Try the **20 Grain Cloud** preset.

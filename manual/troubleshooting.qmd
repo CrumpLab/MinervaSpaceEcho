@@ -1,0 +1,48 @@
+---
+title: "Troubleshooting"
+---
+
+**The plug-in doesn't appear in Live.**
+: Check that it's installed (`/Library/Audio/Plug-Ins` or `~/Library/Audio/Plug-Ins`, in `Components` for the AU
+  and `VST3` for the VST3), that **Use Audio Units v2** / **Use VST3 Plug-In System Folders** are on in
+  **Settings → Plug-Ins**, and click **Rescan**. For builds without Developer ID signing, remove the quarantine
+  (see [Install](get-started/install.qmd#by-hand)).
+
+**macOS says it can't be opened or is damaged.**
+: The build isn't signed with an Apple Developer ID. Use **System Settings → Privacy & Security → Open Anyway**
+  for the installer, or the `xattr` commands on the [Install](get-started/install.qmd) page for the bundles.
+
+**I hear no echo.**
+: Memory needs at least one stored segment, and the echo plays during the *next* segment: with the default
+  1-bar traces, wait for two bar lines. Check **Echo Level**, that **Write Gate** isn't above your signal level,
+  that **Freeze Memory** isn't on with an empty memory, and the line above the matrix (*last: gated* means a gate
+  refused the segment). With **Self Match** off and a one-trace memory there is nothing *else* to answer.
+
+**Nothing is stored ("last: rejected (full)").**
+: Memory is full and **When Full** is *Reject*, or every trace is clamped. Unclamp some, clear memory or raise
+  **Memory Capacity**.
+
+**The echo is out of time.**
+: With **Sync = Tempo** traces follow the host's bar grid; make sure the transport is running. With
+  **Sync = Free** traces start when processing starts. In **Rolling** mode the echo lags the cue a little by design
+  (the status bar shows by how much).
+
+**It's too dense, or it all sounds the same.**
+: Raise **Activation Power** so fewer memories answer, turn **Self Match** off, or lower **Max Active Traces**. For
+  a blur, do the opposite, and try **Blend Domain = Spectral** so the blend doesn't comb-filter.
+
+**MIDI notes do nothing.**
+: Use the VST3 (hosts don't send notes to the AU), check **MIDI Note Control** and **MIDI Channel** on the Control
+  page, and that the notes are in range of **MIDI Base Note**. The **MIDI** light in the header flashes when a note
+  arrives.
+
+**Memory was gone when I reopened the set.**
+: Memory isn't saved with the set unless **Save Memory With Set** is on (Control page). Use **Save Memory…** to keep
+  it as files.
+
+**High CPU.**
+: The spectral engine and very large memories cost the most. Lower **Spectral Voices** or **Max Active Traces**, or
+  use **Blend Domain = Waveform**.
+
+Still stuck? [Open an issue](https://github.com/CrumpLab/MinervaSpaceEcho/issues) with your Live version, macOS
+version, the plug-in format and, if you can, the preset or settings you were using.

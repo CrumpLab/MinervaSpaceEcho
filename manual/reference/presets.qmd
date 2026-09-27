@@ -1,0 +1,9 @@
+---
+title: "Preset reference"
+---
+
+All built-in presets, generated from the files in
+[`presets/`](https://github.com/CrumpLab/MinervaSpaceEcho/tree/HEAD/presets). Settings not listed are at their
+defaults. See [Presets](../guide/presets.qmd) for how loading and saving work.
+
+{{< include _presets.md >}}

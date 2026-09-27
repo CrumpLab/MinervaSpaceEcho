@@ -1,0 +1,77 @@
+---
+title: "Install"
+---
+
+MINERVA Space Echo runs on macOS 11 or later, on Apple Silicon and Intel Macs, as an **Audio Unit** and a
+**VST3**. It is aimed at Ableton Live but works in any AU or VST3 host.
+
+## Download
+
+Tagged versions are published on the [Releases page](https://github.com/CrumpLab/MinervaSpaceEcho/releases).
+For the newest build from any branch, open the repository's
+[Actions tab](https://github.com/CrumpLab/MinervaSpaceEcho/actions/workflows/build.yml), pick a green `build`
+run and download the **MinervaSpaceEcho-macOS** artifact (you need to be signed in to GitHub).
+
+Either way you get two files:
+
+| File | Use it to |
+|---|---|
+| `MinervaSpaceEcho-<version>-macOS.pkg` | Install the AU and VST3 into `/Library/Audio/Plug-Ins` (you can untick either). |
+| `MinervaSpaceEcho-<version>-macOS.zip` | Copy the plug-in bundles by hand. |
+
+### With the installer
+
+Double-click the `.pkg` and follow the steps.
+
+::: {.callout-note}
+## If macOS won't open it
+Builds that aren't signed with an Apple Developer ID are blocked the first time. Open **System Settings →
+Privacy & Security**, scroll down and click **Open Anyway**, then run the installer again.
+:::
+
+### By hand
+
+Unzip the `.zip`, then in Terminal, from the unzipped folder:
+
+```sh
+cp -R "MINERVA Space Echo.component" ~/Library/Audio/Plug-Ins/Components/
+cp -R "MINERVA Space Echo.vst3"      ~/Library/Audio/Plug-Ins/VST3/
+# Remove the download quarantine (needed for builds without Developer ID signing):
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"MINERVA Space Echo.component"
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"MINERVA Space Echo.vst3"
+```
+
+## Set up Live
+
+1. **Live → Settings → Plug-Ins**.
+2. Turn on **Use Audio Units v2** and/or **Use VST3 Plug-In System Folders**.
+3. Click **Rescan**.
+4. In the browser, under **Plug-Ins → CrumpLab**, you'll find **MINERVA Space Echo**.
+
+::: {.callout-tip}
+## AU or VST3?
+They sound identical. Use the **VST3** if you want to trigger actions with MIDI notes from a clip
+([MIDI and automation](../guide/midi.qmd)); hosts don't send notes to AU audio effects. Everything else,
+including MIDI-mapping the parameters, works in both.
+:::
+
+## Build it yourself
+
+You need Xcode's command-line tools and CMake 3.22 or later (`brew install cmake ninja`):
+
+```sh
+git clone https://github.com/CrumpLab/MinervaSpaceEcho.git
+cd MinervaSpaceEcho
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMSE_COPY_PLUGIN_AFTER_BUILD=ON
+cmake --build build
+ctest --test-dir build
+```
+
+The first configure downloads JUCE and Catch2. `MSE_COPY_PLUGIN_AFTER_BUILD=ON` installs the AU and VST3 into
+`~/Library/Audio/Plug-Ins` for you. See [Development](../development.qmd) for more.
+
+## Uninstall
+
+Delete `MINERVA Space Echo.component` from `/Library/Audio/Plug-Ins/Components` (or
+`~/Library/Audio/Plug-Ins/Components`) and `MINERVA Space Echo.vst3` from the matching `VST3` folder. Your
+presets and saved memories are in `~/Music/MINERVA Space Echo`.

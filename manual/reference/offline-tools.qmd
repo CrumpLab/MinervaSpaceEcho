@@ -1,0 +1,63 @@
+---
+title: "Offline tools"
+---
+
+The engine is plain C++ with no plug-in framework, so the same code runs in command-line tools. Build them with
+the rest of the project (see [Development](../development.qmd)); they end up in `build/tools/`. For a quick
+engine-only build: `cmake -S . -B build -DMSE_BUILD_PLUGIN=OFF && cmake --build build`.
+
+## mse-render
+
+Processes a WAV file through the engine exactly as a host would, with a steady clock.
+
+```sh
+build/tools/mse-render [options] <input.wav> <output.wav>
+```
+
+| Option | Meaning |
+|---|---|
+| `--preset <file>` | A preset file (timed `@bar` lines are applied during the render). |
+| `--set key=value` | Set one parameter; repeatable, applied after the preset. |
+| `--bpm <bpm>` | Host tempo (default 120). |
+| `--free` | No host tempo (free-running clock). |
+| `--block <n>` | Block size in samples (default 512). |
+| `--tail <sec>` | Append silence to hear echo tails. |
+| `--seed <n>` | Random seed (encoding failure, dropouts, sampling…). Renders are deterministic for a given seed. |
+| `--load-memory <dir>` | Start with a saved memory. |
+| `--save-memory <dir>` | Save the memory at the end. |
+| `--pcm24` | Write 24-bit PCM instead of 32-bit float. |
+
+`mse-render --help` lists every parameter with its range and default. It also reports CPU use (how many times
+faster than real time, and the slowest block).
+
+```sh
+build/tools/mse-render --preset presets/examples/05_no_self_match.txt --set power=5 in.wav out.wav
+```
+
+## mse-testgen
+
+Writes deterministic synthetic test material: drums, chords and bass, a melody, clicks on every beat, a mid-file
+style change and a full mix.
+
+```sh
+build/tools/mse-testgen [--sr 48000] [--bpm 120] [--bars 16] [--seed 1] [--pcm24] <output-dir>
+```
+
+## Rendering all the examples
+
+```sh
+build/tools/mse-testgen test-audio
+scripts/render_examples.sh build renders
+```
+
+renders every preset in `presets/examples/` (CI does this on every push and publishes the audio on the
+[listening page](../listening.qmd)).
+
+## mse-ui-snapshot
+
+Draws the plug-in window to a PNG without opening a window, after playing generated audio through the plug-in.
+It is how the screenshots in this manual are made.
+
+```sh
+build/plugin/mse-ui-snapshot out.png [width height] ["preset name"] [row to select]
+```

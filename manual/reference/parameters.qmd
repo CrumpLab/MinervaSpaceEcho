@@ -1,0 +1,12 @@
+---
+title: "Parameter reference"
+subtitle: "Every parameter, by the page it appears on"
+---
+
+The **ID** under each name is what presets and `mse-render` use (`power = 9`). Ranges and defaults are read
+from the plug-in's source when this site is built. A parameter can appear on more than one page (the Main page
+repeats the essentials).
+
+A level of −60 dB means *off* for level controls, and −100 dB means *off* for gates and hiss.
+
+{{< include _parameters.md >}}

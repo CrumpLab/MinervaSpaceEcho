@@ -6,6 +6,7 @@ Roland Space Echo has one tape loop. This plugin stores every segment of incomin
 audio as a separate memory trace, and plays back an *echo*: a blend of all the
 traces, each weighted by how similar it is to what you are playing now.
 
+**Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
 **Status: version 0.1.0.** Every stage of the plan is built (see
@@ -108,7 +109,6 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Feedback** | Echo mixed back into what gets recorded (soft-clipped; >1 allowed). |
 | **Echo Level** / **Dry Level** / **Output Gain** | Mix. −60 dB = off. |
 | **Edge Fade** | Fade length at trace edges and when the echo changes (declicking). |
-
 | **MIDI Note Control** / **MIDI Channel** / **MIDI Base Note** | Whether MIDI notes trigger actions, on which channel (Any = all), and the first note of the map (see *MIDI control*). |
 | **Clamp Last / Clamp All / Unclamp All / Clear Unclamped / Clear All (Trigger)** | The memory buttons as parameters: each fires when switched on. Map them to pads with Live's MIDI Map mode, or automate them. |
 
@@ -204,6 +204,7 @@ Presets can change settings partway through a render with timed lines such as
 | `tools/` | `mse-testgen` (synthetic test audio) and `mse-render` (offline WAV processing) |
 | `tests/` | Catch2 unit tests |
 | `presets/` | Presets (`key = value` lines): `factory/` (built into the plugin), `examples/` (listening examples, also built in) |
+| `manual/` | The user manual (Quarto website, published to GitHub Pages) |
 | `docs/` | Screenshot (rendered headless by `mse-ui-snapshot`), release instructions |
 | `scripts/` | Example renders, macOS packaging (`package_macos.sh`) |
 

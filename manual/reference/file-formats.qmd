@@ -1,0 +1,70 @@
+---
+title: "File formats"
+---
+
+## Presets
+
+Plain text, one `key = value` per line; see [Presets](../guide/presets.qmd#the-preset-format).
+
+## Saved memory
+
+**Save Memory…** (and `mse-render --save-memory`) writes a folder:
+
+```
+My memory/
+├── manifest.json
+├── trace_0001.wav
+├── trace_0002.wav
+└── …
+```
+
+Each `trace_NNNN.wav` is one trace's audio, 32-bit float, at the session's sample rate, oldest first.
+`manifest.json` describes the memory:
+
+```json
+{
+  "format": "MINERVA Space Echo memory",
+  "version": 1,
+  "sample_rate": 48000,
+  "channels": 2,
+  "capacity": 100,
+  "feature_slots": 16,
+  "feature_bands": 24,
+  "params": { "power": 3, "capacity": 100, "...": "..." },
+  "traces": [
+    {
+      "file": "trace_0001.wav",
+      "begin": 0,
+      "length": 96000,
+      "nominal_length": 96000,
+      "serial": 1,
+      "rms": 0.12,
+      "strength": 1.0,
+      "use_count": 2.4,
+      "generation": 0,
+      "merge_count": 1,
+      "clamped": false,
+      "features": [0.41, -1.2, "… 384 values …"]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `begin` | Where the audio starts within its segment, in samples (a trace recorded from mid-segment starts later). |
+| `length` | Samples of audio in the WAV. |
+| `nominal_length` | The trace length setting when it was recorded, in samples (used by **Length Mismatch**). |
+| `serial` | Order of storage; ages are counted from it. |
+| `rms` | The trace's level. |
+| `strength` | Activation multiplier; fades with **Fading / Segment**. |
+| `use_count` | Recent accumulated activation (for **When Full = Least Used**). |
+| `generation` | 0 = recorded from the input; *n* = an echo of generation *n−1* material. |
+| `merge_count` | How many segments were consolidated into it. |
+| `clamped` | Locked against replacement. |
+| `features` | The address: 16 slots × 24 bands, slot-major (`index = slot × 24 + band`). |
+| `params` | The parameter values when the memory was saved (for reference; loading memory doesn't change settings). |
+
+Loading resamples memory saved at another sample rate. Newer format versions are refused by older plug-ins.
+To add new audio to memory, use **Import Audio…** rather than editing the folder: imported traces get correct
+addresses.

@@ -1,0 +1,58 @@
+---
+title: "MIDI and automation"
+---
+
+There are two ways to control MINERVA Space Echo from outside: **MIDI notes** sent to the plug-in (VST3 and the
+standalone app) and **parameters** that the host maps and automates (AU and VST3).
+
+## MIDI notes
+
+With **MIDI Note Control** on (the default), notes counted from **MIDI Base Note** (default 36, C1 in Live)
+trigger actions. **MIDI Channel** restricts them to one channel (0 = any).
+
+| Note (default) | Offset | Action |
+|---|---|---|
+| C1 | +0 | Capture |
+| C#1 | +1 | Freeze Memory, while the note is held |
+| D1 | +2 | Spectral Freeze, while the note is held |
+| D#1 | +3 | Clamp Last |
+| E1 | +4 | Clamp All |
+| F1 | +5 | Unclamp All |
+| F#1 | +6 | Clear Unclamped |
+| G1 | +7 | Clear All |
+| C2 | +12 | Mode Selector: Custom |
+| C#2 – G#2 | +13 – +20 | Mode Selector: 1, 2, 3, 2+3, 1+2, 1+3, 1+2+3, Iterative 1+2+3 |
+
+The **Control** page shows the map for the current base note. Mode changes from MIDI apply immediately and the
+**Mode Selector** parameter follows, so they're recorded if you're writing automation.
+
+### Routing notes in Live
+
+1. Put MINERVA Space Echo (VST3) on an audio track.
+2. Create a MIDI track. In its **MIDI To** menu choose the audio track, then the plug-in in the menu below.
+3. Clips on the MIDI track can now freeze, clear, capture and switch heads in time with the music.
+
+::: {.callout-note}
+The AU is built as an ordinary audio effect, and hosts don't send notes to those. Use the VST3 for note control,
+or map parameters as below.
+:::
+
+## Mapping and automating parameters
+
+Every memory action is also a parameter, so you can map it to a pad or knob with Live's **MIDI Map** mode (⌘M)
+or draw it as automation, in both formats:
+
+| Parameter | Fires when switched on |
+|---|---|
+| **Capture** | Capture |
+| **Clamp Last (Trigger)** | Clamp Last |
+| **Clamp All (Trigger)** | Clamp All |
+| **Unclamp All (Trigger)** | Unclamp All |
+| **Clear Unclamped (Trigger)** | Clear Unclamped |
+| **Clear All (Trigger)** | Clear All |
+
+Each fires once on the change from off to on; switch it off again to re-arm. **Freeze Memory**,
+**Spectral Freeze** and **Mode Selector** are ordinary parameters and map the same way.
+
+All continuous parameters glide when they change, so automation doesn't click. **Memory Capacity** and
+**Memory Budget** can't be automated (changing them reorganises memory), and neither can the MIDI settings.

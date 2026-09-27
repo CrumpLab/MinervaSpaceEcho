@@ -1,0 +1,73 @@
+name: docs
+
+# Builds the manual (manual/, Quarto) with freshly rendered listening examples
+# and publishes it to GitHub Pages from the default branch. Other branches
+# build it without publishing, to catch errors.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "manual/**"
+      - "presets/**"
+      - "engine/**"
+      - "tools/**"
+      - "plugin/src/ParamPanel.cpp"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "scripts/render_examples.sh"
+      - "scripts/encode_listening.sh"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the manual
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ffmpeg
+
+      - name: Build the offline tools (engine only, no plug-in)
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMSE_BUILD_PLUGIN=OFF -DMSE_BUILD_TESTS=OFF
+          cmake --build build --parallel
+
+      - name: Render the listening examples
+        run: |
+          scripts/render_examples.sh build renders
+          scripts/encode_listening.sh renders manual/audio
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render the site
+        run: quarto render manual
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: manual/_site
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.ref_name == github.event.repository.default_branch
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,114 @@
+---
+title: "How MINERVA works"
+subtitle: "Hintzman's multiple-trace model, as an audio effect"
+---
+
+**MINERVA II** (Hintzman, 1984, 1986, 1988) is a model of human memory with a striking premise: there are no
+stored abstractions, only **traces** of individual experiences. Every experience is laid down as its own
+trace. Remembering is not looking something up: a **probe** (the current experience) is compared with *every*
+trace at once, each trace responds in proportion to its similarity, and what comes back, the **echo**, is the
+sum of all those responses. Generalisation, prototypes and familiarity all emerge from that one operation.
+
+MINERVA Space Echo takes the model literally, with audio.
+
+## Traces
+
+The input is cut into **segments** (1 bar by default; from 10 ms to 20 s, tempo-synced or free). Each finished
+segment can be stored as a trace, which holds:
+
+- its **audio**, which is what the echo plays back;
+- its **address**, a *feature vector* that describes it, which is what MINERVA compares.
+
+The address is a small spectrogram: **16 time slots × 24 frequency bands** (60 Hz – 16 kHz), 384 numbers in
+all. Band energies are measured in decibels and then *standardised* within the trace (mean 0, standard
+deviation 1), so the address describes the *shape* of the sound, its rhythm and timbre, independent of how loud
+it was. Slots that received no audio are 0: in MINERVA, 0 means "not encoded".
+
+Optionally the address can be **ternary** (−1, 0, +1), as in Hintzman's original simulations, with
+**Ternary Threshold** deciding how far from average a value must be to count.
+
+## Similarity
+
+When a segment ends, it becomes the probe *P* and is compared with every stored trace *T*:
+
+$$
+S = \frac{1}{N}\sum_{j} P_j\,T_j
+$$
+
+where *N* is the number of features that are non-zero in either vector (**Hintzman** similarity; **Cosine** is
+the alternative). *S* is 1 for identical addresses, near 0 for unrelated ones, and negative for opposites.
+
+## Activation
+
+Each trace's **activation** is its similarity raised to a power, keeping the sign:
+
+$$
+A = \operatorname{sign}(S)\,|S|^{p}
+$$
+
+The **Activation Power** *p* is the model's most important knob. Hintzman used *p* = 3 (the default). With
+*p* = 1 every trace contributes almost equally and the echo is a blur of everything in memory, a *schema*. With
+*p* = 9 only near-identical traces respond.
+
+Activation is also scaled by each trace's **strength** (which fades if forgetting is on) and, optionally, by
+**Recency**.
+
+## The echo
+
+The echo is the activation-weighted sum of the traces' audio:
+
+$$
+\text{echo}(t) = g \sum_i A_i\,\text{trace}_i(t)
+$$
+
+The normalisation *g* comes from **Echo Normalization**: **Sum** divides by $\sum|A_i|$ so the echo keeps a
+constant level; **Max** by the largest activation; **Familiarity** leaves weak echoes weak, so an unfamiliar
+cue gets a quiet answer. Negligible activations are dropped so only traces that matter are mixed, and
+**Max Active Traces** caps how many are mixed at once.
+
+The echo plays during the *next* segment, in time with the grid, which is why the model behaves like a delay.
+**Echo Level Tracking** makes the echo's level follow the cue's, the way a tape repeat follows what was
+played, so feedback decays naturally.
+
+## Intensity and familiarity
+
+MINERVA's **intensity** is the sum of activations, $I = \sum_i A_i$: how strongly memory as a whole resonates
+with the probe. Hintzman used it to model recognition ("have I heard this before?"). The plug-in shows it,
+together with the strongest single activation (**familiarity**), in the window, and can route familiarity to the
+echo's tone and feedback.
+
+The echo also has an *address* of its own: the activation-weighted mean of the answering traces' addresses. The
+window shows it as **Echo**, next to what you played (**Heard**). An iterative head uses it to cue memory again:
+the echo of the echo.
+
+## Encoding and forgetting
+
+MINERVA's learning parameter *L* is the probability that each feature is stored correctly. Here, **Encoding
+Failure** zeroes each stored feature with that probability (the cue you heard stays intact), so recall from
+poorly encoded traces is vaguer. Over time, **Forgetting / Segment** keeps knocking features out and
+**Fading / Segment** reduces strength until a trace drops out of memory altogether.
+
+## The pipeline
+
+```{mermaid}
+flowchart TD
+    IN([Input]) --> SEG[Cut into segments]
+    SEG --> FEAT["Address: 16 slots × 24 bands"]
+    FEAT -- store --> STORE[(Memory: traces)]
+    FEAT -- probe --> SIM[Similarity to every trace]
+    STORE --> SIM
+    SIM --> ACT["Activation A = sign(S)·|S|^p"]
+    ACT --> ECHO["Echo = Σ A · trace audio"]
+    STORE -. audio .-> ECHO
+    ECHO --> OUT([Output: dry + echo])
+    ECHO -. feedback .-> SEG
+```
+
+## Further reading
+
+- Hintzman, D. L. (1984). MINERVA 2: A simulation model of human memory. *Behavior Research Methods,
+  Instruments, & Computers, 16*, 96–101.
+- Hintzman, D. L. (1986). "Schema abstraction" in a multiple-trace memory model. *Psychological Review, 93*,
+  411–428.
+- Hintzman, D. L. (1988). Judgments of frequency and recognition memory in a multiple-trace memory model.
+  *Psychological Review, 95*, 528–551.

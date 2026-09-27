@@ -1,0 +1,36 @@
+---
+title: "Heads and playback"
+---
+
+## Three heads
+
+Like the RE-201, the echo can come from up to three playback heads:
+
+- **Head 1** is the memory echo described in [How MINERVA works](../concepts/minerva.qmd).
+- A **Delay** head replays what head 1 played one segment earlier (head 2) or two segments earlier (head 3),
+  like tape heads further along the loop.
+- An **Iterative** head is cued by the previous head's *echo*: head 2 recalls whatever head 1's echo resembles,
+  head 3 whatever head 2's does. Each generation drifts toward memory's prototype.
+
+The **Mode Selector** picks a combination, as on the RE-201: **1**, **2**, **3**, **2+3**, **1+2**, **1+3**,
+**1+2+3** (delay heads), **Iterative 1+2+3**, or **Custom**, which uses **Head 2** and **Head 3** (Off, Delay or
+Iterative). Each head has its own **Level** and **Pan**. Heads 2 and 3 update at segment boundaries (not in
+Rolling mode). The matrix's *Heads* column shows which traces each head is playing.
+
+## Playback
+
+**Playback** decides how head 1's activations become sound:
+
+| Mode | Sound |
+|---|---|
+| **Blend** | Every active trace, weighted: MINERVA's echo. |
+| **Voices** | The strongest **Voices** traces as separate chorus voices: the strongest in the centre, the rest fanned out by **Voice Spread**, detuned up to **Voice Detune** and delayed up to **Voice Delay**. With no spread, detune or delay it equals the blend. |
+| **Sample** | One trace per segment, drawn at random in proportion to its activation. |
+
+**Max Active Traces** caps how many traces a blend mixes (the strongest are kept, at the same total level), which
+keeps very large memories cheap.
+
+## Tone and familiarity
+
+**Echo Tone** is a low-pass on the echo. **Familiarity > Tone** moves it with familiarity (familiar echoes brighter
+or darker) and **Familiarity > Feedback** changes the feedback with it.

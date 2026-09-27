@@ -1,0 +1,31 @@
+---
+title: "Tape character"
+---
+
+The parts of a Space Echo that are about the machine rather than the memory. All are off by default.
+
+| Control | What it does |
+|---|---|
+| **Wow** | Slow, drifting speed wobble (about 0.5 Hz, up to 6 ms). |
+| **Flutter** | Fast speed wobble (about 7 Hz, up to 0.5 ms). |
+| **Tape Drive** | Soft saturation of the echo, transparent for quiet signals; it also shapes what feeds back. |
+| **Hiss** | Tape noise on the echo; with feedback it gets recorded along with the repeats. |
+| **Feedback Bass** / **Feedback Treble** | ±12 dB shelves (250 Hz / 3 kHz) inside the feedback path: each repeat gets thinner or darker, as on the RE-201. |
+| **Spring Level** / **Spring Decay** / **Spring On Dry** | A spring reverb (dispersive allpass chain in a damped loop) on the echo, and optionally on the dry signal as in the RE-201's reverb modes. |
+
+All of these glide when you move them, so they can be automated without clicks.
+
+## Changing the repeat rate
+
+On a tape echo, changing the tape speed changes the pitch of what's on the tape. Here, each trace remembers the
+trace length it was recorded at. When you change the trace length (or the tempo), **Length Mismatch** decides
+what old traces do:
+
+| Mode | Old traces… |
+|---|---|
+| **Varispeed** | …play faster or slower to fit, so their pitch shifts like tape. Halving the repeat rate plays them an octave up. |
+| **Cut** | …play as recorded. |
+| **Loop** | …repeat if shorter than the new length. |
+| **Stretch** | …are time-stretched to fit, keeping their pitch (a phase vocoder; see [Spectral](spectral.qmd)). |
+
+Try it with **Freeze Memory** on: store a few bars, then change **Trace Length (Sync)**.

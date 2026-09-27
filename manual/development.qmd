@@ -1,0 +1,77 @@
+---
+title: "Development"
+---
+
+MINERVA Space Echo is open source ([AGPL-3.0](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/LICENSE)) and
+lives at [github.com/CrumpLab/MinervaSpaceEcho](https://github.com/CrumpLab/MinervaSpaceEcho). The staged design
+is in [`plan.md`](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/plan.md).
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `engine/` | The model: plain C++20 with no framework dependency (features, retrieval, trace store, tape, spectral, presets, memory files). |
+| `plugin/` | The JUCE wrapper (AU, VST3, Standalone) and editor. |
+| `tools/` | `mse-render` and `mse-testgen`. |
+| `tests/` | Catch2 unit tests for the engine. |
+| `presets/` | `factory/` and `examples/` presets, built into the plug-in. |
+| `manual/` | This site (Quarto). |
+| `scripts/` | Example renders and macOS packaging. |
+
+## Building and testing
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+```
+
+Options: `MSE_BUILD_PLUGIN`, `MSE_BUILD_TOOLS`, `MSE_BUILD_TESTS` (all on), `MSE_COPY_PLUGIN_AFTER_BUILD` (off).
+Use `-DMSE_BUILD_PLUGIN=OFF` for a fast engine-only build without JUCE. The plug-in also builds on Linux (VST3 and
+Standalone), which is how CI runs `pluginval` and renders the editor screenshots.
+
+The tests cover, among other things: exact tape-delay equivalence at capacity 1, retrieval maths, every memory
+policy, live cueing, heads, tape character, the spectral engine, import, presets, host edge cases (odd and
+oversized blocks, sample-rate changes, tempo changes, NaN input) and a click test that moves every continuous
+parameter during a steady tone. They also run clean under AddressSanitizer and UndefinedBehaviorSanitizer:
+
+```sh
+cmake -S . -B build-asan -DMSE_BUILD_PLUGIN=OFF \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -O1"
+cmake --build build-asan && ctest --test-dir build-asan
+```
+
+## Real-time design
+
+The audio thread never allocates, locks or waits:
+
+- Memory is preallocated (**Memory Budget**). Changing capacity, loading or importing builds a new store on the
+  message thread, and the audio thread adopts it by swapping buffers at the start of a block.
+- UI actions reach the audio thread through a lock-free queue; the memory view the editor draws is published
+  through a triple buffer about 30 times a second.
+- The rolling search is spread across blocks with a fixed work budget.
+- Parameters glide per sample where a jump would click.
+
+## Continuous integration
+
+`.github/workflows/build.yml` builds and tests on Linux and macOS on every push, runs `pluginval` (and `auval` on
+macOS), renders the example presets and editor snapshots, and packages a universal macOS installer and zip.
+Pushing a `v*` tag creates a GitHub release; see
+[`docs/RELEASING.md`](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/docs/RELEASING.md), which also covers
+Developer ID signing and notarization.
+
+## This manual
+
+The manual is a [Quarto](https://quarto.org) website in `manual/`. The parameter and preset references, the
+listening page and the changelog are generated from the source by `manual/_scripts/generate.py` before each
+render, so they can't drift; every parameter must have a description in `manual/_scripts/param_docs.py`, or the
+build stops.
+
+```sh
+cd manual
+quarto preview        # live preview in a browser
+quarto render         # build into manual/_site
+```
+
+`.github/workflows/docs.yml` renders the listening examples to MP3, builds the site and publishes it to GitHub
+Pages from the default branch.

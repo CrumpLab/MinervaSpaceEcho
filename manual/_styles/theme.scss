@@ -1,0 +1,18 @@
+/*-- scss:defaults --*/
+$primary: #d4852a;
+$link-color: #c0761f;
+$font-family-sans-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+/*-- scss:rules --*/
+.navbar-brand .navbar-title { letter-spacing: 0.06em; font-weight: 700; }
+.hero { padding: 1.5rem 0 0.5rem; }
+.hero .lead { font-size: 1.2rem; }
+figure img, .quarto-figure img { border-radius: 6px; }
+table.param-table td:first-child { white-space: nowrap; }
+code.param-id { font-size: 0.85em; }
+.preset-settings code { font-size: 0.85em; }
+audio { width: 100%; max-width: 560px; }
+// One sidebar holds the whole manual, so Quarto marks the first navbar item
+// active on every page; don't highlight navbar items.
+.navbar .nav-link.active { color: $navbar-fg !important; }
+.navbar .nav-link:hover { color: $primary !important; }

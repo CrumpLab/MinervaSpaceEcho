@@ -1,0 +1,59 @@
+---
+title: "Presets"
+---
+
+The preset menu at the top of the window has three sections:
+
+- **Factory**: 21 presets meant for playing, with the dry signal on and the echo under it.
+- **Examples**: the [listening examples](../listening.qmd), mostly *echo only* (dry off) so you hear just
+  what memory returns.
+- **User**: presets you've saved.
+
+Every preset is listed with its settings in the [preset reference](../reference/presets.qmd).
+
+## Loading
+
+Choosing a preset sets the parameters it mentions and returns **everything else to its default**, so a preset
+always sounds the same whatever you were doing before. Session settings are left alone: **Memory Budget**,
+**Save Memory With Set** and the MIDI settings. Loading a preset never touches memory itself.
+
+**<** and **>** step through the list.
+
+## Saving your own
+
+Click **Save…**, give the preset a name and, if you like, a description. It is saved as a text file in
+`~/Music/MINERVA Space Echo/Presets/<name>.txt` and appears under **User**. To remove one, delete the file.
+
+## The preset format
+
+Presets are plain text, one `key = value` per line, using the parameter IDs from the
+[parameter reference](../reference/parameters.qmd). Comment lines at the top are the description. Only settings
+that differ from the defaults need to be listed:
+
+```ini
+# Self-match off and a sharp activation power: the bar you just played can't
+# answer itself, so memory replies with the closest earlier bar.
+capacity = 100
+power = 9
+self_match = off
+echo_level_db = -4
+```
+
+Choices can be given by name (`sync_mode = Free`, `trace_division = 2 bars`) or index; on/off settings accept
+`on`, `off`, `true`, `false`, `1`, `0`.
+
+The offline renderer `mse-render` reads the same files, so a preset sounds the same offline as in Live. It also
+understands **timed lines**, which change a setting at a given bar (counted from 0, in 4/4):
+
+```ini
+@8 freeze = on
+@8.25 trace_division = 1/2
+@2 command = clamp_all
+```
+
+The plug-in ignores timed lines. See [Offline tools](../reference/offline-tools.qmd).
+
+::: {.callout-tip}
+Live's own device presets (`.adv` files, saved from the device's title bar) work as well and store the
+plug-in's full state, including memory if **Save Memory With Set** is on.
+:::

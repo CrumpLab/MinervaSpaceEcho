@@ -1,0 +1,83 @@
+project:
+  type: website
+  output-dir: _site
+  pre-render: python3 _scripts/generate.py
+  resources:
+    - audio/
+
+website:
+  title: "MINERVA Space Echo"
+  description: "A multiple-trace memory echo: Hintzman's MINERVA II model as a tape echo. AU/VST3 for macOS."
+  site-url: https://crumplab.github.io/MinervaSpaceEcho/
+  repo-url: https://github.com/CrumpLab/MinervaSpaceEcho
+  repo-subdir: manual
+  repo-actions: [edit, issue]
+  page-navigation: true
+  search: true
+  navbar:
+    background: dark
+    left:
+      - text: Get started
+        href: get-started/install.qmd
+      - text: Concepts
+        href: concepts/minerva.qmd
+      - text: User guide
+        href: guide/window.qmd
+      - text: Reference
+        href: reference/parameters.qmd
+      - text: Listen
+        href: listening.qmd
+    right:
+      - icon: github
+        href: https://github.com/CrumpLab/MinervaSpaceEcho
+        aria-label: GitHub
+  sidebar:
+    style: floating
+    search: true
+    contents:
+      - href: index.qmd
+        text: Home
+      - section: Get started
+        contents:
+          - get-started/install.qmd
+          - get-started/first-session.qmd
+      - section: Concepts
+        contents:
+          - concepts/minerva.qmd
+          - concepts/space-echo.qmd
+      - section: User guide
+        contents:
+          - guide/window.qmd
+          - guide/memory.qmd
+          - guide/cueing.qmd
+          - guide/heads.qmd
+          - guide/tape.qmd
+          - guide/spectral.qmd
+          - guide/presets.qmd
+          - guide/import-save.qmd
+          - guide/midi.qmd
+      - section: Reference
+        contents:
+          - reference/parameters.qmd
+          - reference/presets.qmd
+          - reference/file-formats.qmd
+          - reference/offline-tools.qmd
+      - listening.qmd
+      - troubleshooting.qmd
+      - development.qmd
+      - changelog.qmd
+  page-footer:
+    left: "MINERVA Space Echo · AGPL-3.0"
+    right: "Built with [Quarto](https://quarto.org)"
+
+format:
+  html:
+    theme:
+      light: [cosmo, _styles/theme.scss]
+      dark: [darkly, _styles/theme.scss]
+    respect-user-color-scheme: true
+    toc: true
+    toc-depth: 3
+    number-sections: false
+    code-copy: true
+    link-external-newwindow: true

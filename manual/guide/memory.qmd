@@ -1,0 +1,77 @@
+---
+title: "Memory"
+subtitle: "What gets stored, what gets kept, what gets forgotten"
+---
+
+## Size and length
+
+**Trace length** is set by **Sync**: *Tempo* uses **Trace Length (Sync)** (1/16 note to 4 bars, aligned with
+the host's bar grid); *Free* uses **Trace Length (Free)** (10 ms to 20 s).
+
+**Memory Capacity** (1–4000) is how many traces memory holds. **Memory Budget** (128 MB – 4 GB) is the audio
+memory reserved for them. Memory is reserved up front so the audio thread never allocates; with many long slots
+the budget limits the longest trace a slot can hold (the status bar's *slot max*). Changing either keeps the
+traces that fit: clamped ones first, then the newest.
+
+## Writing: what gets stored
+
+At the end of each segment, the segment is stored unless something stops it:
+
+| Setting | Stops storing when… |
+|---|---|
+| **Freeze Memory** | Always (memory keeps answering; nothing changes). |
+| **Write Mode = Manual** | Always, unless you **Capture**. |
+| **Write Gate** | The segment is quieter than the gate. |
+| **Novelty Gate** | *Store Novel*: memory already has something this similar. *Store Familiar*: it doesn't. |
+| **Write Probability** | A random draw says so. |
+
+**Capture** stores the segment in progress regardless of all of these.
+
+**Record Source** decides *what* is stored: the **Input** (with any feedback mixed in), the **Echo** (memory feeds
+on its own output, so it keeps going after the input stops), or both as separate traces.
+
+## When memory is full
+
+**When Full** chooses which trace makes room:
+
+| Policy | Replaces |
+|---|---|
+| **Oldest** | The oldest unclamped trace, like tape. |
+| **Random** | A random unclamped trace. |
+| **Least Used** | The trace with the lowest recent activation ("use it or lose it"). |
+| **Weakest** | The most faded trace. |
+| **Merge Similar** | Nothing: the new segment is averaged into its most similar unclamped trace. |
+| **Reject** | Nothing: new segments aren't stored. |
+
+**Consolidate Above** merges a new segment into an existing trace whenever they are at least this similar, even
+when there's room. Over time memory holds *prototypes*, each an average of many similar segments.
+
+## Clamping
+
+A **clamped** trace is locked in: no full-memory policy will replace it. Clamp traces by clicking the lock column
+in the matrix, with the buttons (**Clamp Last**, **Clamp All**), automatically (**Clamp Incoming**), or with MIDI.
+
+- **Clamp Budget** caps the fraction of memory that can be clamped, so memory can still learn. Clamping beyond it
+  is refused.
+- **Clamped Don't Decay**: clamped traces are also exempt from forgetting.
+- If every slot is clamped and memory is full, new segments are rejected.
+- **Clear Unclamped** forgets everything except the clamped traces.
+
+## Forgetting
+
+| Setting | Effect |
+|---|---|
+| **Encoding Failure (Lf)** | When a trace is stored, each feature of its address is lost with this probability. Recall from it is vaguer. |
+| **Tape Dropouts** | When a trace is stored, each 1/32 of its audio may drop out. |
+| **Forgetting / Segment** | Every segment, stored traces lose features. |
+| **Fading / Segment** | Every segment, stored traces lose strength; below −60 dB they are forgotten entirely. |
+| **Wear Tone** | Older traces play back duller. |
+
+Freeze stops forgetting too.
+
+## Feedback
+
+**Feedback** mixes the echo back into what gets recorded, so each new trace contains the previous echoes, just as
+a tape echo's repeats are re-recorded. It is soft-clipped, and values above 1 are allowed for runaway textures.
+**Feedback Bass**/**Treble** shape each repeat, and **Familiarity > Feedback** lets familiar echoes feed back more
+or less.

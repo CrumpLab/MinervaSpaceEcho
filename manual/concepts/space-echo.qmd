@@ -1,0 +1,39 @@
+---
+title: "Tape echo, memory echo"
+subtitle: "How the Space Echo maps onto MINERVA"
+---
+
+The Roland RE-201 Space Echo records onto a loop of tape and plays it back through several heads a little later;
+some of the output is fed back onto the tape. MINERVA Space Echo keeps the controls and the feel, but replaces
+the single loop with a *memory of many recordings*:
+
+| Space Echo | MINERVA Space Echo |
+|---|---|
+| One tape loop | **Memory**: many traces, one per segment |
+| Repeat rate (tape speed) | **Trace length** (1/16 to 4 bars, or 10 ms – 20 s) |
+| Playback heads 1–3 and the mode selector | **Heads**: head 1 is the memory echo; heads 2 and 3 replay what head 1 played 1 or 2 segments earlier, or re-cue memory with head 1's echo |
+| Intensity (feedback) | **Feedback**: the echo is mixed into what gets recorded next |
+| Bass / treble | **Feedback Bass / Treble**, inside the feedback loop |
+| Wow, flutter, saturation, hiss | **Wow**, **Flutter**, **Tape Drive**, **Hiss** |
+| Spring reverb | **Spring** |
+| Tape wear | **Forgetting**, **Tape Dropouts**, **Wear Tone** |
+| Changing the repeat rate changes pitch | **Length Mismatch = Varispeed** (or keep the pitch with **Stretch**) |
+
+## The delay is a special case
+
+With **Memory Capacity = 1**, **Self Match** on and no encoding failure, memory holds only the last segment and
+it always answers: the echo is exactly that segment, one segment later. That is a tape delay with a repeat time
+of one segment, and the test suite checks it sample for sample. Every other setting departs from the delay in a
+controlled way:
+
+- **More capacity**: earlier segments can answer too, weighted by similarity.
+- **Self Match off**: the last segment can't answer itself; only earlier ones can.
+- **Lower Activation Power**: answers blur together into a prototype.
+- **Freeze**: memory stops changing, like the RE-201's endless repeat.
+
+## Why this is interesting musically
+
+A delay repeats what you *just* played. A memory echo answers with what you played *the last time things sounded
+like this*. Play a chorus again and the first chorus comes back; change style and the echo goes quiet (with
+**Echo Normalization = Familiarity**) or reaches for the nearest thing it knows. Clamp a few bars and they
+become the vocabulary everything else is heard through.

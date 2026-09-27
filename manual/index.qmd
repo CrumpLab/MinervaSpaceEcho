@@ -1,0 +1,65 @@
+---
+title: "MINERVA Space Echo"
+subtitle: "A tape echo whose tape is a memory"
+toc: false
+---
+
+::: {.hero}
+::: {.lead}
+A Roland Space Echo has one tape loop. **MINERVA Space Echo** stores every bar you play as a separate
+memory *trace*, and plays back an **echo**: a blend of all the traces, each weighted by how much it
+resembles what you are playing now.
+:::
+:::
+
+![The plug-in window: each row of the memory matrix is one stored bar.](images/screenshot.png){fig-alt="The plug-in window, with the memory matrix at the top left, the Heard and Echo spectrograms at the top right, and tabbed parameter pages below."}
+
+It is an audio effect (AU and VST3 for macOS, aimed at Ableton Live) built on **MINERVA II**, Douglas
+Hintzman's multiple-trace model of human memory. With the memory set to a single trace it is exactly a
+1-bar tape delay. Give it a hundred traces and it starts answering you with *earlier* bars that sound
+like this one: a delay with déjà vu.
+
+## Where to start
+
+::: {.grid}
+::: {.g-col-12 .g-col-md-6}
+### [Install it](get-started/install.qmd)
+Download the installer, or build it yourself.
+:::
+::: {.g-col-12 .g-col-md-6}
+### [First session in Live](get-started/first-session.qmd)
+Ten minutes from an empty track to memory echoes.
+:::
+::: {.g-col-12 .g-col-md-6}
+### [How MINERVA works](concepts/minerva.qmd)
+Traces, similarity, activation and the echo, in plain terms and in equations.
+:::
+::: {.g-col-12 .g-col-md-6}
+### [Listen](listening.qmd)
+Thirty-odd rendered examples, from a plain tape delay to grain clouds.
+:::
+:::
+
+## What it can do
+
+- **Remember and recall.** Up to 4000 traces, from 10 ms grains to 4-bar phrases, tempo-synced or free.
+- **Choose what to keep.** Freeze memory, gate what gets stored, clamp (lock) traces so they're never
+  replaced, merge similar bars into prototypes, or let memory fade and forget.
+- **Cue it live.** Recall by the last bar, as each bar unfolds, or continuously with no bar grid.
+- **Be a Space Echo.** Three playback heads with an RE-201-style mode selector, wow and flutter, tape
+  drive, hiss, feedback EQ and a spring reverb.
+- **Blend spectrally.** Mix memories as spectra so they don't cancel, time-stretch old traces, freeze
+  the echo into a drone.
+- **Show its work.** A live view of the memory matrix: every trace's address, its activation, and which
+  heads are playing it.
+- **Seed it.** Drop audio files in to fill memory; save and reload memories as plain WAV + JSON folders.
+- **Play it.** Presets, MIDI note control and automatable actions.
+
+::: {.callout-warning}
+## Version 0.1.0
+Every stage of the [build plan](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/plan.md) is in place and
+the plug-in passes Apple's `auval` and `pluginval`, but it has not yet been played much in Live. Expect rough
+edges and please [report problems](https://github.com/CrumpLab/MinervaSpaceEcho/issues).
+:::
+
+MINERVA Space Echo is open source under the [AGPL-3.0](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/LICENSE).

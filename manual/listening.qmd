@@ -1,0 +1,14 @@
+---
+title: "Listening examples"
+subtitle: "The example presets, rendered offline"
+---
+
+Each example is 16 bars at 120 BPM of generated test material (see [Offline tools](reference/offline-tools.qmd)),
+processed by the engine with one of the presets in `presets/examples/`. Most are **echo only** (dry off), so what
+you hear is only what memory returns. The *style change* input plays one style for 8 bars, then another, which
+shows how memory handles the new material.
+
+These are also in the plug-in's preset menu under **Examples**; settings shown with `@` change at that bar during
+the render (the plug-in ignores those).
+
+{{< include _listening.md >}}

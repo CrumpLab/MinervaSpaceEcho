@@ -1,0 +1,46 @@
+---
+title: "Importing and saving memory"
+---
+
+## Seeding memory with audio
+
+Drop audio files onto the plug-in window, or click **Import Audio…**. WAV, AIFF, FLAC, Ogg, MP3, M4A and CAF files
+are supported.
+
+Each file is cut into traces of the **current trace length**, starting at the beginning of the file, and every
+trace gets its address exactly as if it had been played in. You can seed memory with a drum break, a phrase or a
+field recording, then let your playing recall pieces of it.
+
+- Imported traces join memory as the **newest** traces. If memory is full, clamped traces are kept first, then
+  the newest, so imports win over older unclamped traces.
+- Turn on **Clamp imports** to protect them from being replaced (within the **Clamp Budget**; raise it if you want
+  to clamp a lot).
+- Silent stretches are skipped. A last piece shorter than a quarter of a trace is dropped.
+- Files are resampled to the session's sample rate. Decoding runs in the background; audio never stops.
+- At most **Memory Capacity** traces are imported at a time.
+
+::: {.callout-tip}
+Set the trace length before importing. With **Sync = Tempo** at 1 bar, a 4-bar loop at the session's tempo
+becomes 4 aligned traces; with **Sync = Free** and 40 ms, it becomes hundreds of grains.
+:::
+
+## Saving and loading memory
+
+**Save Memory…** writes the whole memory to a folder: one WAV per trace plus `manifest.json`, which holds every
+trace's address, clamp state, age, strength and history, and the parameters in use. The default location is
+`~/Music/MINERVA Space Echo/Memories`.
+
+**Load Memory…** replaces memory with a saved folder (choose the folder or its `manifest.json`). Memory saved at
+another sample rate is resampled. If the folder holds more traces than **Memory Capacity**, clamped traces are
+kept first, then the newest.
+
+The format is described in [File formats](../reference/file-formats.qmd). The offline renderer can load and save
+the same folders.
+
+## Memory in the Live set
+
+Memory is **not** saved with the Live set by default: a set with a full memory can get large (about 23 MB per
+minute of stored audio). Turn on **Save Memory With Set** (Control page) to embed it. Without it, a reopened set
+starts with an empty memory, but all settings are restored.
+
+Memory also survives changes of sample rate or channel count (it is resampled or mixed down) and offline bounces.
