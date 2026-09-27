@@ -1,0 +1,51 @@
+---
+title: "About"
+author:
+  - name: Matthew Crump
+    orcid: 0000-0002-5612-0090
+    url: https://crumplab.com
+    affiliations:
+      - name: Brooklyn College of CUNY
+---
+
+## Author
+
+**Matthew Crump** is a computational cognitive psychologist at Brooklyn College of CUNY. His lab website is
+[crumplab.com](https://crumplab.com), and his ORCID iD is
+[0000-0002-5612-0090](https://orcid.org/0000-0002-5612-0090).
+
+MINERVA Space Echo is experimental software: an attempt to hear what a model of human memory does when its
+memories are sounds. It was written with help from [Claude Code](https://claude.com/claude-code) (Anthropic).
+
+## How to cite
+
+If you use MINERVA Space Echo in research, teaching or music, please cite it:
+
+> Crump, M. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software].
+> <https://github.com/CrumpLab/MinervaSpaceEcho>
+
+```bibtex
+@software{crump_minerva_space_echo_2026,
+  author  = {Crump, Matthew},
+  title   = {{MINERVA Space Echo}},
+  year    = {2026},
+  version = {0.1.0},
+  url     = {https://github.com/CrumpLab/MinervaSpaceEcho}
+}
+```
+
+The repository's [`CITATION.cff`](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/CITATION.cff) has the same
+details; GitHub turns it into a **Cite this repository** button on the repository page.
+
+The model itself is Douglas Hintzman's MINERVA II; see the references on
+[How MINERVA works](concepts/minerva.qmd#further-reading).
+
+## Licence
+
+MINERVA Space Echo is open source under the
+[GNU Affero General Public License v3.0](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/LICENSE), as
+required by the open-source licence of [JUCE](https://juce.com), the audio-plug-in framework it is built on.
+
+## Feedback
+
+Bug reports and ideas are welcome as [GitHub issues](https://github.com/CrumpLab/MinervaSpaceEcho/issues).

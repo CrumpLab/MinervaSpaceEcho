@@ -6,6 +6,9 @@ Roland Space Echo has one tape loop. This plugin stores every segment of incomin
 audio as a separate memory trace, and plays back an *echo*: a blend of all the
 traces, each weighted by how similar it is to what you are playing now.
 
+By [Matthew Crump](https://crumplab.com) ([ORCID 0000-0002-5612-0090](https://orcid.org/0000-0002-5612-0090)),
+Brooklyn College of CUNY.
+
 **Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
@@ -272,6 +275,19 @@ build/tools/mse-render --preset presets/passthrough.txt --set output_gain_db=-6 
 
 `mse-render` uses the same parameter IDs as the plugin, so a preset sounds the
 same offline and in Live.
+
+## Author
+
+**Matthew Crump**, computational cognitive psychologist, Brooklyn College of CUNY.
+Lab website: <https://crumplab.com> · ORCID: [0000-0002-5612-0090](https://orcid.org/0000-0002-5612-0090)
+
+This is experimental software, written with help from [Claude Code](https://claude.com/claude-code) (Anthropic).
+
+## How to cite
+
+GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
+
+> Crump, M. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 

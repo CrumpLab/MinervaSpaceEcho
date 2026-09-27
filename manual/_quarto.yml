@@ -28,6 +28,8 @@ website:
       - text: Listen
         href: listening.qmd
     right:
+      - text: About
+        href: about.qmd
       - icon: github
         href: https://github.com/CrumpLab/MinervaSpaceEcho
         aria-label: GitHub
@@ -66,9 +68,10 @@ website:
       - troubleshooting.qmd
       - development.qmd
       - changelog.qmd
+      - about.qmd
   page-footer:
-    left: "MINERVA Space Echo · AGPL-3.0"
-    right: "Built with [Quarto](https://quarto.org)"
+    left: "MINERVA Space Echo by [Matthew Crump](https://crumplab.com), Brooklyn College of CUNY · [AGPL-3.0](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/LICENSE)"
+    right: "Written with help from Claude Code · Built with [Quarto](https://quarto.org)"
 
 format:
   html:

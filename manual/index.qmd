@@ -1,6 +1,12 @@
 ---
 title: "MINERVA Space Echo"
 subtitle: "A tape echo whose tape is a memory"
+author:
+  - name: Matthew Crump
+    orcid: 0000-0002-5612-0090
+    url: https://crumplab.com
+    affiliations:
+      - name: Brooklyn College of CUNY
 toc: false
 ---
 
@@ -63,3 +69,4 @@ edges and please [report problems](https://github.com/CrumpLab/MinervaSpaceEcho/
 :::
 
 MINERVA Space Echo is open source under the [AGPL-3.0](https://github.com/CrumpLab/MinervaSpaceEcho/blob/HEAD/LICENSE).
+It was written by Matthew Crump with help from Claude Code; see [About](about.qmd) for how to cite it.

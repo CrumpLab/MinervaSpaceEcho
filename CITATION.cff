@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "MINERVA Space Echo"
+abstract: >-
+  An experimental audio effect (AU/VST3) that treats Hintzman's MINERVA II
+  multiple-trace memory model as a tape echo: every segment of incoming audio
+  is stored as a memory trace, and the echo is an activation-weighted blend of
+  the traces most similar to what is playing now.
+type: software
+authors:
+  - family-names: Crump
+    given-names: Matthew
+    affiliation: "Brooklyn College of CUNY"
+    orcid: "https://orcid.org/0000-0002-5612-0090"
+    website: "https://crumplab.com"
+version: 0.1.0
+date-released: 2026-09-27
+license: AGPL-3.0-only
+repository-code: "https://github.com/CrumpLab/MinervaSpaceEcho"
+url: "https://crumplab.github.io/MinervaSpaceEcho/"
+keywords:
+  - MINERVA II
+  - multiple-trace memory
+  - cognitive modeling
+  - audio plugin
+  - tape echo
