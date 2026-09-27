@@ -5,6 +5,7 @@
 #include "mse/MemorySnapshot.h"
 #include "mse/Params.h"
 #include "mse/Retrieval.h"
+#include "mse/Spectral.h"
 #include "mse/Tape.h"
 #include "mse/TraceStore.h"
 
@@ -79,7 +80,7 @@ class EchoEngine
 {
 public:
     static constexpr int kMaxChannels = 2;
-    static constexpr int kMaxCapacity = 1000;
+    static constexpr int kMaxCapacity = 4000;
 
     EchoEngine();
     ~EchoEngine();
@@ -177,6 +178,10 @@ private:
     void dropMissingEntries (Playlist& pl) noexcept;
     void processChunk (float* const* io, int ioChannels, int offset, int len, const float* const* sc, int scChannels) noexcept;
     void accumulate (Playlist& pl, int head, int ioChannels, int blockOffset, int len) noexcept;
+    static void advance (Playlist& pl, int len) noexcept;
+    bool spectralHeads() const noexcept;
+    void renderSpectral (int head, int ioChannels, int blockOffset, int len) noexcept;
+    void spectralFrame (int head, int ioChannels, int blockOffset, int offsetInChunk) noexcept;
     void stepLingering() noexcept;
     void beginMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_acq_rel); }
     void endMutation() noexcept { mutationSeq.fetch_add (1, std::memory_order_release); }
@@ -256,6 +261,19 @@ private:
     uint64_t hissRng = 0x9e3779b97f4a7c15ull;
     float springGain = 0.0f;
     bool feedbackEqActive = false;
+
+    // spectral engine: per head, a renderer and an overlap-add ring
+    struct SpectralHead
+    {
+        SpectralRenderer renderer;
+        std::array<std::vector<float>, kMaxChannels> ring;
+        int ringPos = 0;
+        int countdown = 0;       // samples until the next frame
+        bool active = false;
+    };
+    std::array<SpectralHead, kNumHeads> spectral;
+    std::vector<SpectralSource> spectralSources;
+    std::array<std::vector<float>, kMaxChannels> spectralFrameBuf;
     float toneZ[kMaxChannels] {};
 
     // live cueing

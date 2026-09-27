@@ -1,0 +1,8 @@
+# Spectral freeze: at bar 6 the echo's spectrum is held as a drone for four
+# bars, then released (echo only).
+blend_domain = Spectral
+capacity = 100
+power = 3
+dry_level_db = -60
+@6 spectral_freeze = on
+@10 spectral_freeze = off

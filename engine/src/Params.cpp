@@ -20,7 +20,8 @@ const char* const kFocusChoices[] = { "Full", "Rhythm", "Timbre" };
 const char* const kSelectorChoices[] = { "Custom", "1", "2", "3", "2+3", "1+2", "1+3", "1+2+3", "Iterative 1+2+3" };
 const char* const kHeadModeChoices[] = { "Off", "Delay", "Iterative" };
 const char* const kPlaybackChoices[] = { "Blend", "Voices", "Sample" };
-const char* const kMismatchChoices[] = { "Varispeed", "Cut", "Loop" };
+const char* const kMismatchChoices[] = { "Varispeed", "Cut", "Loop", "Stretch" };
+const char* const kDomainChoices[] = { "Waveform", "Spectral" };
 const char* const kSimilarityChoices[] = { "Hintzman", "Cosine" };
 const char* const kFeatureChoices[] = { "Continuous", "Ternary" };
 const char* const kNegativeChoices[] = { "Subtract", "Ignore", "Absolute" };
@@ -41,7 +42,7 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "trace_ms",           "Trace Length (Free)",   ParamType::Float,  10,   20000,  2000,  1000, "ms",     NOCHOICE,                      true },
     { "trace_division",     "Trace Length (Sync)",   ParamType::Choice, 0,    6,      4,     0,    "",       CHOICE (kDivisionChoices),     true },
     // memory
-    { "capacity",           "Memory Capacity",       ParamType::Int,    1,    1000,   100,   100,  "traces", NOCHOICE,                      false },
+    { "capacity",           "Memory Capacity",       ParamType::Int,    1,    4000,   100,   100,  "traces", NOCHOICE,                      false },
     { "memory_budget",      "Memory Budget",         ParamType::Choice, 0,    5,      3,     0,    "",       CHOICE (kBudgetChoices),       false },
     { "full_policy",        "When Full",             ParamType::Choice, 0,    5,      0,     0,    "",       CHOICE (kPolicyChoices),       true },
     { "merge_threshold",    "Consolidate Above",     ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
@@ -105,7 +106,7 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "normalization",      "Echo Normalization",    ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kNormChoices),         true },
     { "level_tracking",     "Echo Level Tracking",   ParamType::Float,  0,    1,      1,     0,    "",       NOCHOICE,                      true },
     // tape character
-    { "length_mismatch",    "Length Mismatch",       ParamType::Choice, 0,    2,      0,     0,    "",       CHOICE (kMismatchChoices),     true },
+    { "length_mismatch",    "Length Mismatch",       ParamType::Choice, 0,    3,      0,     0,    "",       CHOICE (kMismatchChoices),     true },
     { "wow",                "Wow",                   ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     { "flutter",            "Flutter",               ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
     { "tape_drive",         "Tape Drive",            ParamType::Float,  0,    1,      0,     0,    "",       NOCHOICE,                      true },
@@ -115,6 +116,11 @@ const std::array<ParamSpec, kNumParams> kSpecs { {
     { "spring_level_db",    "Spring Level",          ParamType::Float,  kLevelOffDb, 6, kLevelOffDb, 0, "dB", NOCHOICE,                   true },
     { "spring_decay",       "Spring Decay",          ParamType::Float,  0.3f, 6,      2,     0,    "s",      NOCHOICE,                      true },
     { "spring_on_dry",      "Spring On Dry",         ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
+    // spectral engine
+    { "blend_domain",       "Blend Domain",          ParamType::Choice, 0,    1,      0,     0,    "",       CHOICE (kDomainChoices),       true },
+    { "spectral_voices",    "Spectral Voices",       ParamType::Int,    1,    32,     12,    0,    "",       NOCHOICE,                      true },
+    { "spectral_freeze",    "Spectral Freeze",       ParamType::Bool,   0,    1,      0,     0,    "",       CHOICE (kBoolChoices),         true },
+    { "max_active",         "Max Active Traces",     ParamType::Int,    1,    512,    64,    64,   "",       NOCHOICE,                      true },
     // output
     { "feedback",           "Feedback",              ParamType::Float,  0,    1.2f,   0,     0,    "",       NOCHOICE,                      true },
     { "echo_level_db",      "Echo Level",            ParamType::Float,  kLevelOffDb, 6, 0,   0,    "dB",     NOCHOICE,                      true },
@@ -249,6 +255,11 @@ EngineParams paramsFromValues (const ParamValues& raw)
     p.springLevelDb = v (kSpringLevelDb);
     p.springDecaySeconds = v (kSpringDecay);
     p.springOnDry = on (kSpringOnDry);
+
+    p.blendDomain = static_cast<BlendDomain> (idx (kBlendDomain));
+    p.spectralVoices = idx (kSpectralVoices);
+    p.spectralFreeze = on (kSpectralFreeze);
+    p.maxActive = idx (kMaxActive);
 
     p.feedback = v (kFeedback);
     p.echoLevelDb = v (kEchoLevelDb);

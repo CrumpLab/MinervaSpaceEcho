@@ -1,0 +1,8 @@
+# As 26, but Length Mismatch = Stretch: halving the repeat rate squeezes the old
+# bars into half the time without changing their pitch (echo only).
+capacity = 100
+power = 9
+length_mismatch = Stretch
+dry_level_db = -60
+@8.25 freeze = on
+@8.25 trace_division = 1/2

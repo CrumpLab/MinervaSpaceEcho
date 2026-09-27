@@ -91,6 +91,17 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
     motion.prepare (sampleRate);
     spring.prepare (sampleRate);
     motionBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
+    for (auto& sh : spectral)
+    {
+        sh.renderer.prepare (sampleRate, kMaxChannels);
+        for (auto& r : sh.ring)
+            r.assign (static_cast<size_t> (sh.renderer.frameSize()), 0.0f);
+        sh.ringPos = sh.countdown = 0;
+        sh.active = false;
+    }
+    spectralSources.resize (kMaxCapacity * 2);
+    for (auto& f : spectralFrameBuf)
+        f.assign (static_cast<size_t> (spectral[0].renderer.frameSize()), 0.0f);
     envStep = std::max (1, static_cast<int> (std::lround (sampleRate / 1000.0)));
     envProduced = 0;
     envAcc = 0.0;
@@ -1141,7 +1152,7 @@ void EchoEngine::effectiveHeads (HeadMode modes[kNumHeads], float gains[kNumHead
 
 int EchoEngine::shapePlayback (EchoWeight* w, int n) noexcept
 {
-    if (n <= 1 || params.playback == Playback::Blend)
+    if (n <= 1 || (params.playback == Playback::Blend && n <= params.maxActive))
         return n;
 
     double total = 0.0;
@@ -1167,8 +1178,9 @@ int EchoEngine::shapePlayback (EchoWeight* w, int n) noexcept
         return 1;
     }
 
-    // Voices: the k strongest traces, strongest first, at the same total level.
-    const int k = std::min (params.voices, n);
+    // Voices (or a blend capped at Max Active Traces): the k strongest traces,
+    // strongest first, at the same total level.
+    const int k = std::min (params.playback == Playback::Voices ? params.voices : params.maxActive, n);
     for (int i = 0; i < k; ++i)
     {
         int best = i;
@@ -1254,7 +1266,9 @@ void EchoEngine::installEcho (int head, const EchoWeight* src, int n, float trac
         if (installNominal > 0.0 && s.nominalLen > 0.0)
         {
             const double ratio = s.nominalLen / installNominal;
-            if (params.lengthMismatch == LengthMismatch::Varispeed && std::abs (ratio - 1.0) > 1.0e-9)
+            const bool fitLength = params.lengthMismatch == LengthMismatch::Varispeed
+                                   || params.lengthMismatch == LengthMismatch::Stretch; // stretch: spectral, pitch kept
+            if (fitLength && std::abs (ratio - 1.0) > 1.0e-9)
                 fit = ratio;
             else if (params.lengthMismatch == LengthMismatch::Loop && static_cast<double> (s.end - s.begin) < installNominal)
                 e.loopLen = s.end - s.begin;
@@ -1689,6 +1703,125 @@ void EchoEngine::accumulate (Playlist& pl, int head, int ioChannels, int blockOf
         pl.count = 0;
 }
 
+void EchoEngine::advance (Playlist& pl, int len) noexcept
+{
+    pl.pos += len;
+    pl.rampPos += len;
+    if (pl.fadingOut && pl.rampPos >= pl.rampLen)
+        pl.count = 0;
+}
+
+bool EchoEngine::spectralHeads() const noexcept
+{
+    return params.blendDomain == BlendDomain::Spectral || params.lengthMismatch == LengthMismatch::Stretch;
+}
+
+void EchoEngine::renderSpectral (int head, int ioChannels, int blockOffset, int len) noexcept
+{
+    auto& sh = spectral[static_cast<size_t> (head)];
+    const int N = sh.renderer.frameSize();
+    if (! sh.active)
+    {
+        // Entering spectral mode: start from a clean overlap-add state.
+        for (auto& r : sh.ring)
+            std::fill (r.begin(), r.end(), 0.0f);
+        sh.ringPos = 0;
+        sh.countdown = 0;
+        sh.renderer.reset();
+        sh.active = true;
+    }
+
+    int i = 0;
+    while (i < len)
+    {
+        if (sh.countdown <= 0)
+        {
+            spectralFrame (head, ioChannels, blockOffset, i);
+            sh.countdown = sh.renderer.hop();
+        }
+        const int n = std::min (len - i, sh.countdown);
+        for (int c = 0; c < ioChannels; ++c)
+        {
+            float* dst = echoBuf[static_cast<size_t> (c)].data() + i;
+            auto& ring = sh.ring[static_cast<size_t> (c)];
+            for (int j = 0; j < n; ++j)
+            {
+                auto& slot = ring[static_cast<size_t> ((sh.ringPos + j) % N)];
+                dst[j] += slot;
+                slot = 0.0f;
+            }
+        }
+        sh.ringPos = (sh.ringPos + n) % N;
+        sh.countdown -= n;
+        i += n;
+    }
+    advance (headCurrent[static_cast<size_t> (head)], len);
+    advance (headPrevious[static_cast<size_t> (head)], len);
+}
+
+void EchoEngine::spectralFrame (int head, int ioChannels, int blockOffset, int at) noexcept
+{
+    auto& sh = spectral[static_cast<size_t> (head)];
+    const int N = sh.renderer.frameSize();
+    const int storeCh = store->numChannels();
+    const float headGain = headGainNow[head] + headGainInc[head] * static_cast<float> (blockOffset + at);
+
+    // Every playing memory of this head (current echo and the one fading out),
+    // with its gain and read position at this frame.
+    int n = 0;
+    for (auto* pl : { &headCurrent[static_cast<size_t> (head)], &headPrevious[static_cast<size_t> (head)] })
+    {
+        if (pl->count == 0)
+            continue;
+        float ramp = 1.0f;
+        if (pl->rampLen > 0)
+        {
+            const float r = static_cast<float> (pl->rampPos + at + 1) / static_cast<float> (pl->rampLen);
+            ramp = pl->fadingOut ? std::max (0.0f, 1.0f - r) : std::min (1.0f, r);
+        }
+        for (int k = 0; k < pl->count; ++k)
+        {
+            const auto& e = pl->entries[static_cast<size_t> (k)];
+            const double start = e.rate == 1.0 ? static_cast<double> (pl->pos + at + e.offset)
+                                               : e.anchorTrace + static_cast<double> (pl->pos + at - e.anchor) * e.rate;
+            if (start >= static_cast<double> (e.end) || start + N <= static_cast<double> (e.begin))
+                continue;
+            auto& s = spectralSources[static_cast<size_t> (n++)];
+            s.audio[0] = e.audio[0];
+            s.audio[1] = e.audio[std::min (1, storeCh - 1)];
+            s.begin = e.begin;
+            s.end = e.end;
+            s.start = start;
+            s.rate = e.rate;
+            const float g = ramp * headGain;
+            s.gain[0] = (ioChannels == 1 ? 0.5f * (e.gain[0] + e.gain[1]) : e.gain[0]) * g;
+            s.gain[1] = e.gain[1] * g;
+        }
+    }
+
+    // Only the strongest few are worth transforming.
+    const int keep = std::min (n, params.spectralVoices);
+    for (int a = 0; a < keep; ++a)
+    {
+        int best = a;
+        for (int b = a + 1; b < n; ++b)
+            if (std::abs (spectralSources[static_cast<size_t> (b)].gain[0]) + std::abs (spectralSources[static_cast<size_t> (b)].gain[1])
+                > std::abs (spectralSources[static_cast<size_t> (best)].gain[0]) + std::abs (spectralSources[static_cast<size_t> (best)].gain[1]))
+                best = b;
+        std::swap (spectralSources[static_cast<size_t> (a)], spectralSources[static_cast<size_t> (best)]);
+    }
+
+    float* frames[kMaxChannels] = { spectralFrameBuf[0].data(), spectralFrameBuf[1].data() };
+    sh.renderer.render (spectralSources.data(), keep, ioChannels, params.spectralFreeze, frames);
+    for (int c = 0; c < ioChannels; ++c)
+    {
+        auto& ring = sh.ring[static_cast<size_t> (c)];
+        const float* f = frames[c];
+        for (int j = 0; j < N; ++j)
+            ring[static_cast<size_t> ((sh.ringPos + j) % N)] += f[j];
+    }
+}
+
 void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int len, const float* const* sc,
                                int scChannels) noexcept
 {
@@ -1696,8 +1829,15 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
         std::fill_n (echoBuf[static_cast<size_t> (c)].data(), len, 0.0f);
     if (motionActive)
         motion.fill (motionBuf.data(), len, params.wow, params.flutter);
+    const bool useSpectral = spectralHeads();
     for (int h = 0; h < kNumHeads; ++h)
     {
+        if (useSpectral)
+        {
+            renderSpectral (h, ioChannels, offset, len);
+            continue;
+        }
+        spectral[static_cast<size_t> (h)].active = false;
         accumulate (headCurrent[static_cast<size_t> (h)], h, ioChannels, offset, len);
         accumulate (headPrevious[static_cast<size_t> (h)], h, ioChannels, offset, len);
     }

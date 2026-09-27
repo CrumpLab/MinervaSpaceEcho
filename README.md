@@ -8,7 +8,7 @@ traces, each weighted by how similar it is to what you are playing now.
 
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: Stage 5 (tape character).** The plugin cuts the input into traces
+**Status: Stage 6 (spectral engine).** The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
 cues memory with each bar you play. It then plays the resulting echo, an
 activation-weighted blend of stored bars, during the next bar. With Memory
@@ -20,7 +20,9 @@ the bar, or with no bar grid at all (rolling). Stage 4 adds RE-201-style
 playback heads, chorus voices, random sampling, and other cue sources
 (sidechain, random, frozen). Stage 5 adds the machine itself: varispeed,
 wow and flutter, tape drive, hiss, bass/treble in the feedback path, and a
-spring reverb.
+spring reverb. Stage 6 can blend memories as spectra instead of waveforms,
+time-stretch old traces to a new repeat rate without changing pitch, freeze
+the echo's spectrum into a drone, and hold thousands of tiny "grain" traces.
 
 ## How it behaves
 
@@ -52,7 +54,7 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | Parameter | What it does |
 |---|---|
 | **Sync** / **Trace Length (Sync)** / **Trace Length (Free)** | Trace length: 1/16 … 4 bars following Live's tempo, or 10 ms … 20 s free-running. Tempo-synced traces align to Live's bar grid. |
-| **Memory Capacity** / **Memory Budget** | Max traces (1–1000) and the audio memory reserved for them (128 MB – 4 GB; with many traces the budget limits the longest trace). Changing either keeps the traces (clamped first, then newest). |
+| **Memory Capacity** / **Memory Budget** | Max traces (1–4000) and the audio memory reserved for them (128 MB – 4 GB; with many traces the budget limits the longest trace). Changing either keeps the traces (clamped first, then newest). |
 | **When Full** | Which trace makes room: Oldest, Random, Least Used (lowest recent activation), Weakest (most faded), Merge Similar (average the new bar into its closest unclamped trace), or Reject (keep what's there). |
 | **Consolidate Above** | Merge a new bar into an existing trace whenever they are at least this similar, even if there is room (1 = off). Prototypes form. |
 | **Freeze Memory** | Stop storing and stop decay; memory keeps answering. |
@@ -86,7 +88,11 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
 | **Negative Activations** | Subtract (phase-inverted, true MINERVA), Ignore, or Absolute. |
 | **Echo Normalization** | Sum (constant loudness), Max, or Familiarity (echo is quiet when the cue resembles nothing in memory). |
 | **Echo Level Tracking** | 1: echo level follows the cue's level, like a tape repeat, so feedback decays. 0: memories return at their own level. |
-| **Length Mismatch** | When a stored trace was recorded at a different trace length (you changed the repeat rate or the tempo): **Varispeed** plays it faster or slower to fit, so its pitch shifts like tape; **Cut** plays it as recorded; **Loop** repeats a shorter trace to fill the segment. |
+| **Length Mismatch** | When a stored trace was recorded at a different trace length (you changed the repeat rate or the tempo): **Varispeed** plays it faster or slower to fit, so its pitch shifts like tape; **Cut** plays it as recorded; **Loop** repeats a shorter trace to fill the segment; **Stretch** time-stretches it to fit (phase vocoder), keeping its pitch. |
+| **Blend Domain** | **Waveform**: the echo is the activation-weighted sum of trace audio (exact, but unaligned memories can cancel or comb-filter). **Spectral**: each memory's short-time magnitude spectrum is weighted and summed, and every frequency bin takes the phase of the memory loudest there, so memories blend without cancelling. Spectral frames are ~43 ms, so echo changes fade in over about that long; Detune, Wow/Flutter and Loop are ignored in this mode. |
+| **Spectral Voices** | How many of the most active memories (per head) are analysed each spectral frame (1–32). Fewer = cheaper and clearer. |
+| **Spectral Freeze** | Holds the current echo spectrum as a drone (its partials keep turning at their measured frequencies). Memory can change or be cleared underneath it. |
+| **Max Active Traces** | Blends use at most this many of the most active traces (1–512; the rest are dropped and the level kept). Keeps very large memories — e.g. thousands of 15 ms "grain" traces — cheap. |
 | **Wow** / **Flutter** | Slow (drifting, ~0.5 Hz, up to 6 ms) and fast (~7 Hz, up to 0.5 ms) speed wobble of the echo. |
 | **Tape Drive** | Soft saturation of the echo (unity for quiet signals), which also shapes what feeds back. |
 | **Hiss** | Tape noise on the echo (−100 dB = off). With feedback it gets recorded along with the repeats. |

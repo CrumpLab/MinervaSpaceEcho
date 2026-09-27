@@ -1,0 +1,7 @@
+# Power 1 blends every memory, as in 04, but as spectra: no phasey comb
+# filtering from unaligned bars. Compare with 04_memory_power1 (echo only).
+blend_domain = Spectral
+spectral_voices = 16
+capacity = 100
+power = 1
+dry_level_db = -60

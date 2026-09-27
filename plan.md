@@ -514,6 +514,29 @@ offline tool, and from Stage 1 on, a plugin you can load in Live.
   phase-cancellation smear when blending unaligned material.
 - Short-frame "grain memory" variant (traces of 20–200 ms, thousands of them).
   Spectral freeze and time-stretch.
+- **Status:** implemented; awaiting a listen in Live.
+  - Blend Domain = Spectral renders each head by STFT (sqrt-Hann, 75 %
+    overlap, ~43 ms frames: 2048 at 48 kHz). Each frame analyses the top
+    Spectral Voices memories (current and fading-out playlists, with their
+    ramps and gains), sums their magnitudes and gives every bin the phase of
+    the loudest memory there. Stereo channels share one packed complex FFT.
+    Frames read ahead inside stored traces, so there is no added latency;
+    the cost is a ~43 ms fade-in when the echo changes.
+  - With one unstretched memory the output reconstructs it (capacity 1 is
+    still a delay, to 2e-4). Two anti-phase memories that cancel in the
+    waveform domain give full level spectrally (>10x).
+  - Length Mismatch = Stretch plays old traces at the new length through a
+    phase vocoder (a 2 s, 440 Hz trace played in a 1 s segment stays at
+    440 Hz). It uses the spectral path even in the Waveform domain.
+  - Spectral Freeze holds the magnitudes and advances each bin's phase by its
+    smoothed measured frequency (plus slight jitter), so the drone keeps
+    its pitch after memory is cleared.
+  - Grain memory: capacity now goes to 4000; Max Active Traces (default 64)
+    caps how many traces one blend uses, so 2000 × 15 ms traces run at ~70x
+    realtime.
+  - 94 engine tests + plugin state test, clean under ASan/UBSan; pluginval
+    passes at strictness 10. Spectral presets run at ~14–18x realtime (the
+    slowest 512-sample block ~1.5 ms of its 10.7 ms).
 
 ### Stage 7: Custom UI and control
 - Memory matrix view: traces as rows, live activation bars, intensity meter,

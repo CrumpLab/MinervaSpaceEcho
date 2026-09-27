@@ -22,7 +22,8 @@ enum class HeadMode { Off, Delay, Iterative };
 enum class Playback { Blend, Voices, Sample };
 enum class CueSource { Input, Sidechain, Random, Frozen };
 enum class FeatureFocus { Full, Rhythm, Timbre };
-enum class LengthMismatch { Varispeed, Cut, Loop };
+enum class LengthMismatch { Varispeed, Cut, Loop, Stretch };
+enum class BlendDomain { Waveform, Spectral };
 
 // RE-201-style head combinations. Custom uses the per-head settings.
 enum class ModeSelector { Custom, H1, H2, H3, H2H3, H1H2, H1H3, H1H2H3, Iterative123 };
@@ -121,6 +122,12 @@ struct EngineParams
     float springDecaySeconds = 2.0f;
     bool springOnDry = false;                          // spring also on the dry signal (RE-201 modes 8-11)
 
+    // spectral engine (Stage 6)
+    BlendDomain blendDomain = BlendDomain::Waveform;
+    int spectralVoices = 12;                           // strongest memories rendered per frame
+    int maxActive = 64;                                // strongest memories mixed into a blended echo
+    bool spectralFreeze = false;                       // hold the echo's spectrum
+
     // output
     float feedback = 0.0f;
     float echoLevelDb = 0.0f;
@@ -159,6 +166,7 @@ enum ParamIndex
     kNormalization, kLevelTracking,
     kLengthMismatch, kWow, kFlutter, kTapeDrive, kHissDb, kFeedbackBassDb, kFeedbackTrebleDb,
     kSpringLevelDb, kSpringDecay, kSpringOnDry,
+    kBlendDomain, kSpectralVoices, kSpectralFreeze, kMaxActive,
     kFeedback, kEchoLevelDb, kDryLevelDb, kEdgeFadeMs, kOutputGainDb,
     kEmbedMemory,
     kNumParams
