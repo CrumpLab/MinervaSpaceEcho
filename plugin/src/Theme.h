@@ -16,6 +16,7 @@ const juce::Colour head2 { 0xff4fc1b0 };      // teal
 const juce::Colour head3 { 0xffb68cf0 };      // violet
 const juce::Colour negative { 0xff4a90d9 };   // blue: negative values
 const juce::Colour danger { 0xffe0604f };
+const juce::Colour probe { 0xffe87ba4 };      // magenta: the probe (Stage 11)
 
 juce::Colour headColour (int head);
 

@@ -774,6 +774,32 @@ melody; a pitch address can.
   - ~2 % more CPU for the extra analysis.
   - The planned `mse-explore` report tool is deferred.
 
+### Stage 11: Probing memory
+
+Goal: a sanity check. Use a trace's address as a cue and see and hear what it
+activates, to judge whether the similarities make sense and what each
+address encoding implies.
+
+- Probe (side panel button, Shift-click a row), running or paused. Every trace
+  ranked by activation (scrollable), with S under the current Address and the
+  five per-set similarities; click to audition a trace; the probe pinned.
+- Play echo, once or looped: raw blend, or through the echo's tone, tape,
+  head 1 / echo level and spring (switchable). Compare n vs n or n vs n−1;
+  include itself.
+- Engine: the per-set similarities are cached per probe and recomputed only
+  when memory, the probe, the similarity measure or focus change; the
+  activations follow the retrieval settings every view update (cheap).
+
+- **Status:** implemented (version 0.5.0); awaiting a listen in Live.
+  - Probing uses no random numbers and never touches use counts, fatigue or
+    features: a test renders with and without probing and compares
+    bit-for-bit (with cue noise, habituation and Sample playback on).
+  - The probe's echo has its own tape motion and spring, so the plug-in's
+    are untouched; heads 2/3 and feedback are left out. While looping, a
+    re-rank crossfades (20 ms) to the new blend.
+  - Scale memory, last C probed with n vs n−1: [C | D] takes 100 % of the
+    activation under Pitch and 23 % under Spectrum.
+
 ---
 
 ## 9. Decisions

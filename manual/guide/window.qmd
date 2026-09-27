@@ -63,6 +63,31 @@ many do.
   and returns afterwards. **Loop** repeats it until you press **Stop**. With Sequence Context on, **n−1 | n** plays
   the segment before it (if that is still in memory) and then the trace. Auditions are never recorded.
 
+## Probing memory
+
+A sanity check for the model: use a trace's address as a cue and see, and hear, which traces it activates. Select a
+trace and press **Probe** (or **Shift-click** its row; again to end). It works running or paused, and never changes
+memory, the random streams or what the plug-in plays.
+
+![Probing with trace #6 under Address = Pitch: the ranked list beside the matrix, the probe's activations in magenta.](../images/screenshot-probe.png){fig-alt="The plug-in window with the probe panel: a ranked list of traces with similarity columns, and magenta activation bars in the matrix."}
+
+- The **activation** bars in the matrix show the probe's activations, in magenta, and the probe row is outlined.
+- The side panel lists **every trace, ranked** by how strongly it answers: its share of the total activation
+  (**act**), its similarity under the current Address (**S**) and under each address set (**Sp** Spectrum, **PC**
+  Pitch Class, **Pi** Pitch, **Ti** Timbre, **Rh** Rhythm; the set in use is highlighted). The probe itself is pinned
+  at the top (**P**). **Click** a row to listen to that trace; click again to stop.
+- **Play echo** plays the echo this probe produces, soloed, once or with **Loop**. Unticked, **Full path** plays
+  the *raw* blend: the traces' audio mixed by their activations. Ticked, the blend goes through the echo's tone,
+  tape (wow, flutter, drive, hiss), head 1 and echo level, and spring, as the plug-in would sound (without heads 2
+  and 3 or feedback).
+- **n vs n** compares the probe with each trace's own address (recall); **n vs n−1** (with Sequence Context on)
+  with each trace's context half, so the list is what memory expects to come *next*.
+- **Include itself** lets the probe trace answer too (it always matches itself at 1).
+
+Everything updates as you change the **Address**, **Activation Power**, **Similarity** and the other retrieval
+settings, even while the echo loops, so you can hear what each encoding treats as similar. The probe uses the
+retrieval settings except cue noise and habituation, so it describes memory itself.
+
 ## Memory buttons
 
 | Button | Does |

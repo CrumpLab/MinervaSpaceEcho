@@ -12,7 +12,7 @@ Brooklyn College of CUNY.
 **Manual:** <https://crumplab.github.io/MinervaSpaceEcho/> (source in [`manual/`](manual)).
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
-**Status: version 0.4.0.** Every stage of the plan is built (see
+**Status: version 0.5.0.** Every stage of the plan is built (see
 [`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
 
 The plugin cuts the input into traces
@@ -146,6 +146,10 @@ That is **Cue Mode = Segment**. Two live modes change *when* memory is cued:
   first). Alt-click a row to audition it.
 - **Running / Paused** (header): pause to leave memory untouched while you
   inspect and audition it.
+- **Probe** (side panel, or Shift-click a row): use a trace's address as a
+  cue and see every trace ranked by activation, with its similarity under the
+  current Address and each address set; play the probe's echo (raw, or through
+  the echo path). Re-ranks live as you change Address or retrieval settings.
 - **Buttons**: **Capture**, **Clamp Last**, **Clamp All**, **Unclamp All**,
   **Clear Unclamped**, **Clear All**, **Import Audio…**, **Save Memory…**,
   **Load Memory…**, and **Clamp imports**.
@@ -300,7 +304,7 @@ This is experimental software, written with help from [Claude Code](https://clau
 
 GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
 
-> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.4.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.5.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 

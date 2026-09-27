@@ -34,6 +34,7 @@ target_sources(MinervaSpaceEcho PRIVATE
     src/PluginEditor.cpp
     src/MemoryMatrix.cpp
     src/ParamPanel.cpp
+    src/ProbePanel.cpp
     src/Theme.cpp
 )
 

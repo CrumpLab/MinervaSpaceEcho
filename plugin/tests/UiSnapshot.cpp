@@ -13,7 +13,7 @@ int main (int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::printf ("usage: mse-ui-snapshot out.png [width height] [preset]\n");
+        std::printf ("usage: mse-ui-snapshot out.png [width height] [preset] [row] [probe|probe-next]\n");
         return 1;
     }
     juce::ScopedJuceInitialiser_GUI gui;
@@ -50,6 +50,19 @@ int main (int argc, char** argv)
     ed->refresh();
     if (argc > 5)
         ed->selectRow (std::atoi (argv[5]));
+    if (argc > 6 && juce::String (argv[6]).startsWith ("probe"))
+    {
+        // Probe with the selected row (Stage 11), optionally comparing with n-1.
+        if (const auto* v = processor.readMemoryView(); v != nullptr && argc > 5 && std::atoi (argv[5]) < v->count)
+        {
+            processor.sendCommand (mse::Command::ProbeTrace, v->rows[static_cast<size_t> (std::atoi (argv[5]))].serial);
+            if (juce::String (argv[6]) == "probe-next")
+                processor.sendCommand (mse::Command::ProbeCompare, 1);
+        }
+        block.clear();
+        for (int k = 0; k < 20; ++k)
+            processor.processBlock (block, midi);
+    }
     ed->refresh();
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
     juce::File out (juce::File::getCurrentWorkingDirectory().getChildFile (argv[1]));

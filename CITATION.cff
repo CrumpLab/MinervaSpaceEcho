@@ -13,7 +13,7 @@ authors:
     affiliation: "Brooklyn College of CUNY"
     orcid: "https://orcid.org/0000-0002-5612-0090"
     website: "https://crumplab.com"
-version: 0.4.0
+version: 0.5.0
 date-released: 2026-09-27
 license: AGPL-3.0-only
 repository-code: "https://github.com/CrumpLab/MinervaSpaceEcho"

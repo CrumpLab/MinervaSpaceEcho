@@ -55,6 +55,8 @@ struct EngineStats
     bool captureArmed = false;
     bool paused = false;           // Running = off
     uint64_t auditionSerial = 0;   // trace being auditioned (0 = none)
+    uint64_t probeSerial = 0;      // trace used as the probe (0 = none)
+    bool probePlaying = false;     // the probe's echo is playing
 };
 
 // Actions sent from the UI (or any single producer thread) to the audio thread.
@@ -73,7 +75,14 @@ enum class Command
     AuditionTrace,      // play one trace soloed, once
     AuditionLoop,       // ... looping until stopped
     AuditionPair,       // the trace before it (if still in memory), then the trace: [n-1 | n]
-    StopAudition,
+    StopAudition,       // also stops the probe's echo
+    // Probe (Stage 11): a trace's address as a cue, for inspection. Memory,
+    // the random streams and the normal output are never changed by it.
+    ProbeTrace,         // probe with this trace (argument: serial)
+    ClearProbe,
+    ProbeCompare,       // argument: 0 = recall (n against n), 1 = next (n against traces' n-1)
+    ProbeIncludeSelf,   // argument: 0 = leave the probe trace out, 1 = let it answer
+    ProbePlay,          // play the probe's echo soloed; argument bits: 1 = loop, 2 = full echo path
 };
 
 // The MINERVA echo (plan §3 Mode A, §5 memory management):
@@ -175,6 +184,10 @@ private:
                     const float* const* sidechain, int sidechainChannels, bool fadeOut) noexcept;
     void processPaused (float* const* io, int ioChannels, int numSamples) noexcept;
     void mixAudition (float* const* io, int ioChannels, int numSamples) noexcept;
+    void updateProbe() noexcept;              // recompute the probe's similarities/activations if needed
+    void refreshProbeVoices (bool crossfade) noexcept;
+    void renderProbe (int ioChannels, int numSamples) noexcept;
+    void probeEchoPath (int ioChannels, int numSamples) noexcept;
     void resetPlayback() noexcept;
     void clearHeads() noexcept;
     void resetContext() noexcept;
@@ -401,6 +414,48 @@ private:
         float solo = 0.0f;         // 0 = normal output .. 1 = audition only
     } audition;
     std::vector<float> auditionBuf[kMaxChannels];
+
+    // probe (Stage 11)
+    struct Probe
+    {
+        uint64_t serial = 0;       // 0 = no probe
+        bool next = false;         // compare with traces' n-1 halves
+        bool includeSelf = false;
+        // Per-set similarities are cached; they depend on these.
+        bool simsValid = false;
+        const TraceStore* store = nullptr;
+        int storeSize = 0;
+        uint64_t storeSerial = 0, featureSum = 0;
+        Similarity kind = Similarity::Hintzman;
+        FeatureFocus focus = FeatureFocus::Full;
+        std::vector<std::array<float, kNumSets>> sims;  // per slot
+        std::vector<float> activation;                  // per slot (A_i; 0 = negligible or not compared)
+        std::vector<float> combined;                    // per slot: S under the current Address
+        std::vector<EchoWeight> weights;                // the last retrieval, strongest kept
+        int count = 0;
+        float intensity = 0.0f;
+    } probeState;
+    struct ProbeVoice
+    {
+        int slot = -1;
+        uint64_t serial = 0;
+        float gain = 0.0f;
+    };
+    static constexpr int kProbeVoices = 64;
+    struct ProbePlay
+    {
+        bool active = false, loop = false, full = false;
+        std::array<ProbeVoice, kProbeVoices> cur {}, prev {};
+        int curCount = 0, prevCount = 0;
+        int64_t xfade = 0, xfadeLen = 1;   // crossfade from prev to cur (re-ranked while playing)
+        int64_t pos = 0, length = 0, tail = 0;
+    } probePlay;
+    std::vector<float> probeBuf[kMaxChannels], probeRing[kMaxChannels], probeMotionBuf;
+    int probeRingPos = 0;
+    float probeToneZ[kMaxChannels] {}, probeHissHp[kMaxChannels] {};
+    uint64_t probeHissRng = 0x9e3779b97f4a7c15ull;
+    TapeMotion probeMotion;
+    SpringReverb probeSpring;
     bool lastTrigger[EngineParams::kNumTriggers] {};
 
     // memory view (triple buffer: the audio thread fills `viewBack`, then swaps
@@ -436,6 +491,8 @@ private:
         std::atomic<bool> captureArmed { false };
         std::atomic<bool> paused { false };
         std::atomic<uint64_t> auditionSerial { 0 };
+        std::atomic<uint64_t> probeSerial { 0 };
+        std::atomic<bool> probePlaying { false };
     } stats;
 };
 

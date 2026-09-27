@@ -104,6 +104,10 @@ void MemoryMatrix::update (const mse::MemoryView& v)
     capacity = juce::jmax (1, v.capacity);
     clampLimit = v.clampLimit;
     rows.assign (v.rows.begin(), v.rows.begin() + v.count);
+    probeSerial = v.probeSerial;
+    if (probeSerial != 0)
+        for (auto& r : rows)
+            r.activation = r.probe; // probe view: the bars show the probe's activations
 
     maxAct = 0.0f;
     maxPlay = 0.0f;
@@ -220,7 +224,7 @@ void MemoryMatrix::paint (juce::Graphics& g)
         if (maxAct > 0.0f && std::abs (act) > 0.0f)
         {
             const float w = juce::jmin (1.0f, std::abs (act) / maxAct) * kActW;
-            g.setColour (act > 0.0f ? theme::accent : theme::negative);
+            g.setColour (act > 0.0f ? (probeSerial != 0 ? theme::probe : theme::accent) : theme::negative);
             g.fillRect (actX, y + (h > 3.0f ? 0.5f : 0.0f), w, juce::jmax (1.0f, h - (h > 3.0f ? 1.0f : 0.0f)));
         }
         if (maxPlay > 0.0f)
@@ -281,6 +285,8 @@ void MemoryMatrix::paint (juce::Graphics& g)
             outlineRow (i, theme::text, 1.5f);
         if (auditioning != 0 && rows[static_cast<size_t> (i)].serial == auditioning)
             outlineRow (i, theme::head2, 2.0f);
+        if (probeSerial != 0 && rows[static_cast<size_t> (i)].serial == probeSerial)
+            outlineRow (i, theme::probe, 2.0f);
     }
     if (hoverRow >= 0 && hoverRow < count)
         outlineRow (hoverRow, theme::text.withAlpha (0.35f), 1.0f);
@@ -321,6 +327,13 @@ void MemoryMatrix::mouseDown (const juce::MouseEvent& e)
             onAudition (auditioning == r.serial ? 0 : r.serial);
         return;
     }
+    if (e.mods.isShiftDown())
+    {
+        // Shift-click: probe memory with this trace (again to end the probe).
+        if (onProbe)
+            onProbe (probeSerial == r.serial ? 0 : r.serial);
+        return;
+    }
     selected = selected == r.serial ? 0 : r.serial;
     if (onSelect)
         onSelect (selected);
@@ -349,7 +362,8 @@ juce::String MemoryMatrix::getTooltip()
     if (hoverRow < 0 || hoverRow >= count)
         return {};
     auto text = traceText (rows[static_cast<size_t> (hoverRow)]);
-    text << "\n\nClick to inspect; Alt-click to listen; click the lock column to clamp or unclamp.";
+    text << "\n\nClick to inspect; Alt-click to listen; Shift-click to probe memory with it; click the lock column "
+            "to clamp or unclamp.";
     return text;
 }
 
@@ -382,6 +396,23 @@ MemorySidePanel::MemorySidePanel()
             onAudition (sel.serial, 2);
     };
     auditionButton.setTooltip ("Listen to this trace on its own (the plug-in's output is muted while it plays). Alt-click a row does the same.");
+
+    addChildComponent (probeButton);
+    probeButton.onClick = [this] {
+        if (hasSelection && onProbe)
+            onProbe (probeSerial == sel.serial ? 0 : sel.serial);
+    };
+    probeButton.setTooltip ("Use this trace's address as a cue: see and hear which traces it activates, under the current "
+                            "Address and retrieval settings. Shift-click a row does the same.");
+    addChildComponent (probePanel);
+    probePanel.onCommand = [this] (mse::Command c, uint64_t arg) {
+        if (onCommand)
+            onCommand (c, arg);
+    };
+    probePanel.onAuditionRow = [this] (uint64_t serial) {
+        if (onAudition)
+            onAudition (auditioning == serial ? 0 : serial, 0);
+    };
     pairButton.setTooltip ("Listen to the segment before this trace (if it is still in memory), then the trace: its [n-1 | n]");
     loopToggle.setTooltip ("Repeat the audition until stopped");
 }
@@ -393,6 +424,7 @@ void MemorySidePanel::setAuditioning (uint64_t serial)
         auditioning = serial;
         updateAuditionButtons();
     }
+    probePanel.setAuditioning (serial);
 }
 
 void MemorySidePanel::updateAuditionButtons()
@@ -429,6 +461,12 @@ void MemorySidePanel::update (const mse::MemoryView& v, uint64_t selectedSerial)
         }
     lockButton.setVisible (hasSelection);
     deleteButton.setVisible (hasSelection);
+    probeButton.setVisible (hasSelection);
+    probeSerial = v.probeSerial;
+    probeButton.setButtonText (hasSelection && probeSerial == sel.serial ? "End probe" : "Probe");
+    if (probeSerial != 0)
+        probePanel.update (v);
+    probePanel.setVisible (probeSerial != 0);
     updateAuditionButtons();
     lockButton.setButtonText (hasSelection && sel.clamped ? "Unclamp" : "Clamp");
     repaint();
@@ -444,7 +482,9 @@ void MemorySidePanel::resized()
     meterArea = r.removeFromTop (34);
     r.removeFromTop (8);
     auto buttons = r.removeFromBottom (26);
-    lockButton.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (0, 0).withTrimmedRight (3));
+    const int w3 = buttons.getWidth() / 3;
+    probeButton.setBounds (buttons.removeFromLeft (w3).withTrimmedRight (3));
+    lockButton.setBounds (buttons.removeFromLeft (w3).withTrimmedLeft (2).withTrimmedRight (2));
     deleteButton.setBounds (buttons.withTrimmedLeft (3));
     r.removeFromBottom (4);
     auto listen = r.removeFromBottom (26);
@@ -454,11 +494,17 @@ void MemorySidePanel::resized()
     loopToggle.setBounds (listen.reduced (4, 0));
     r.removeFromBottom (6);
     selArea = r;
+    // The probe takes the space above the audition buttons.
+    auto probeArea = getLocalBounds().reduced (8, 6);
+    probeArea.setBottom (auditionButton.getY() - 6);
+    probePanel.setBounds (probeArea);
 }
 
 void MemorySidePanel::paint (juce::Graphics& g)
 {
     g.fillAll (theme::panel);
+    if (probeSerial != 0)
+        return; // the probe panel covers it
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
 
     auto caption = [&] (juce::Rectangle<int> area, const juce::String& text) {

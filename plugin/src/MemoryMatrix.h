@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ProbePanel.h"
 #include "mse/MemoryView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -30,6 +31,7 @@ public:
     std::function<void (uint64_t serial)> onSelect;
     std::function<void (uint64_t serial, bool lock)> onLock;
     std::function<void (uint64_t serial)> onAudition; // Alt-click on a row
+    std::function<void (uint64_t serial)> onProbe;    // Shift-click on a row
 
     void setAuditioning (uint64_t serial) { if (serial != auditioning) { auditioning = serial; repaint(); } }
 
@@ -58,6 +60,7 @@ private:
     int hoverRow = -1;
     bool sequence = false; // rows show [n-1 | n]
     uint64_t auditioning = 0;
+    uint64_t probeSerial = 0; // probe view: activations are the probe's
 };
 
 // Beside the matrix: what cued memory, what came back, how familiar it was,
@@ -73,6 +76,8 @@ public:
     std::function<void (uint64_t serial)> onDelete;
     // mode: 0 once, 1 loop, 2 [n-1 | n] pair; serial 0 = stop
     std::function<void (uint64_t serial, int mode)> onAudition;
+    std::function<void (uint64_t serial)> onProbe;              // probe with this trace (0 = end the probe)
+    std::function<void (mse::Command, uint64_t)> onCommand;     // probe controls
 
     void setAuditioning (uint64_t serial);
 
@@ -91,6 +96,8 @@ private:
     bool hasSelection = false;
     mse::TraceView sel;
     std::array<int8_t, mse::kSetSize> selThumb {}, selContextThumb {};
-    juce::TextButton lockButton { "Clamp" }, deleteButton { "Delete" };
+    juce::TextButton lockButton { "Clamp" }, deleteButton { "Delete" }, probeButton { "Probe" };
     juce::Rectangle<int> heardArea, echoArea, meterArea, selArea;
+    ProbePanel probePanel;
+    uint64_t probeSerial = 0;
 };

@@ -4,6 +4,7 @@
 #include "mse/Params.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -26,6 +27,10 @@ struct TraceView
     int generation = 0;
     int mergeCount = 1;
     bool clamped = false;
+    // Probe (Stage 11), when one is set:
+    float probe = 0.0f;        // activation A_i for the probe (0 = negligible, or the probe itself left out)
+    float probeSim = 0.0f;     // similarity to the probe under the current Address (weighted mix)
+    std::array<float, kNumSets> probeSims {}; // similarity to the probe under each address set
 };
 
 struct MemoryView
@@ -56,6 +61,14 @@ struct MemoryView
     bool sequence = false;     // Sequence Context on: show [n-1 | n]
     int contextCue = 1;        // ContextCue index
     bool chain = false;        // Cue Source = Echo Chain
+
+    // Probe (Stage 11): a trace's address used as a cue, for inspection.
+    uint64_t probeSerial = 0;  // 0 = none
+    bool probeNext = false;    // compared with traces' n-1 halves (else n)
+    bool probeIncludeSelf = false;
+    bool probePlaying = false, probeLoop = false, probeFull = false;
+    float probeIntensity = 0.0f; // sum of the probe's activations
+    int probeCount = 0;        // traces with a non-negligible activation
 
 private:
     bool blend (SetVector& out, bool contextHalf) const noexcept

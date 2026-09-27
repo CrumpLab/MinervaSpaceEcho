@@ -40,6 +40,13 @@ With **Pitch Class** or **Pitch** the chain plays the scale. Pitch Class hears C
 continues with D (what followed C); Pitch knows the octave. Hear the three walks in the
 [listening examples](../listening.qmd#38_scale_walk_spectrum) (38–40).
 
+## Hearing the difference
+
+The [probe](window.qmd#probing-memory) shows the table above for your own material. In the scale memory, probe the
+last C with **n vs n−1**: under **Pitch**, [C | D] takes all of the activation, so the probe's echo is a D; under
+**Spectrum** it gets under a quarter, the rest going to the other notes, and the echo is a blur of the scale. Loop the echo and switch
+the Address to hear it change.
+
 ## Mixing addresses
 
 With **Address = Custom**, the similarity is the weighted mean of each set's similarity, using the five weights on the

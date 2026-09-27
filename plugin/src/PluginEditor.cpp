@@ -66,6 +66,18 @@ MinervaSpaceEchoEditor::MinervaSpaceEchoEditor (MinervaSpaceEchoProcessor& p)
                                    serial);
     };
     matrix.onAudition = [this] (uint64_t serial) { side.onAudition (serial, 0); };
+    // Probe (Stage 11): a trace's address as a cue, for inspection.
+    side.onProbe = [this] (uint64_t serial) {
+        if (serial == 0)
+        {
+            processor.sendCommand (mse::Command::StopAudition);
+            processor.sendCommand (mse::Command::ClearProbe);
+        }
+        else
+            processor.sendCommand (mse::Command::ProbeTrace, serial);
+    };
+    matrix.onProbe = side.onProbe;
+    side.onCommand = [this] (mse::Command c, uint64_t arg) { processor.sendCommand (c, arg); };
 
     // Running / paused.
     addAndMakeVisible (runButton);
@@ -514,6 +526,9 @@ void MinervaSpaceEchoEditor::refresh()
     runButton.setColour (juce::TextButton::buttonOnColourId, theme::head2.withAlpha (0.45f));
     if (st.paused)
         clockText = "PAUSED  |  memory untouched, dry signal only   |   " + clockText;
+    if (st.probeSerial != 0)
+        clockText = "PROBE #" + juce::String (static_cast<juce::int64> (st.probeSerial))
+                    + (st.probePlaying ? " (playing)" : "") + "   |   " + clockText;
 
     phase = st.segmentPhase;
     repaint (header);

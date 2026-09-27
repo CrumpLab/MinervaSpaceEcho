@@ -20,6 +20,7 @@ add_executable(mse_tests
     EdgeTests.cpp
     SequenceTests.cpp
     AddressTests.cpp
+    ProbeTests.cpp
 )
 target_compile_definitions(mse_tests PRIVATE MSE_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
 target_link_libraries(mse_tests PRIVATE mse_tools_common nlohmann_json::nlohmann_json Catch2::Catch2WithMain)

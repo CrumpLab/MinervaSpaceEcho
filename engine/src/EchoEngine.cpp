@@ -76,6 +76,10 @@ EchoEngine::EchoEngine()
         past.weights.resize (kMaxCapacity);
         past.serials.resize (kMaxCapacity);
     }
+    probeState.sims.resize (kMaxCapacity + TraceStore::kSpares);
+    probeState.activation.resize (kMaxCapacity + TraceStore::kSpares);
+    probeState.combined.resize (kMaxCapacity + TraceStore::kSpares);
+    probeState.weights.resize (kMaxCapacity);
 }
 
 EchoEngine::~EchoEngine() = default;
@@ -96,6 +100,23 @@ void EchoEngine::prepare (double sr, int maxBlock, int channels)
     motion.prepare (sampleRate);
     spring.prepare (sampleRate);
     motionBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
+    // Probe echo (Stage 11): its own tape and spring, so the echo's are untouched.
+    probeMotion.prepare (sampleRate);
+    probeSpring.prepare (sampleRate);
+    probeMotionBuf.assign (static_cast<size_t> (maxBlockSize), 0.0f);
+    {
+        int ring = 16;
+        while (ring < static_cast<int> (0.01 * sampleRate) + 8) // wow + flutter stay below 7 ms
+            ring *= 2;
+        for (int c = 0; c < kMaxChannels; ++c)
+        {
+            probeBuf[c].assign (static_cast<size_t> (maxBlockSize), 0.0f);
+            probeRing[c].assign (static_cast<size_t> (ring), 0.0f);
+        }
+        probeRingPos = 0;
+    }
+    probePlay.active = false;
+    probeState.simsValid = false;
     for (auto& sh : spectral)
     {
         sh.renderer.prepare (sampleRate, kMaxChannels);
@@ -504,6 +525,8 @@ EngineStats EchoEngine::getStats() const noexcept
     s.captureArmed = stats.captureArmed.load (std::memory_order_relaxed);
     s.paused = stats.paused.load (std::memory_order_relaxed);
     s.auditionSerial = stats.auditionSerial.load (std::memory_order_relaxed);
+    s.probeSerial = stats.probeSerial.load (std::memory_order_relaxed);
+    s.probePlaying = stats.probePlaying.load (std::memory_order_relaxed);
     return s;
 }
 
@@ -591,6 +614,8 @@ void EchoEngine::adoptPendingStore() noexcept
     liveStore.store (store.get(), std::memory_order_release);
     audition.active = false; // its slot numbering is gone
     audition.solo = 0.0f;
+    probePlay.active = false;
+    probeState.simsValid = false;
     ++viewStoreEpoch;       // slot numbering changed: redraw every thumbnail
     rolling.active = false; // slot indices refer to the old store
     for (auto& past : history)
@@ -748,6 +773,7 @@ void EchoEngine::runCommand (Command c, uint64_t arg) noexcept
             const int pos = store->positionOfSerial (arg);
             if (pos < 0 || arg == 0)
                 break;
+            probePlay.active = false; // one soloed thing at a time
             audition.firstSerial = arg;
             audition.nextSerial = 0;
             if (c == Command::AuditionPair)
@@ -768,6 +794,51 @@ void EchoEngine::runCommand (Command c, uint64_t arg) noexcept
         }
         case Command::StopAudition:
             audition.active = false;
+            probePlay.active = false;
+            break;
+        case Command::ProbeTrace:
+            if (arg != 0 && store->positionOfSerial (arg) >= 0)
+            {
+                if (probeState.serial != arg)
+                    probePlay.active = false; // another probe: another echo
+                probeState.serial = arg;
+                probeState.simsValid = false;
+                updateProbe();
+            }
+            break;
+        case Command::ClearProbe:
+            probeState.serial = 0;
+            probePlay.active = false;
+            break;
+        case Command::ProbeCompare:
+            probeState.next = arg != 0;
+            probeState.simsValid = false;
+            updateProbe();
+            break;
+        case Command::ProbeIncludeSelf:
+            probeState.includeSelf = arg != 0;
+            updateProbe();
+            break;
+        case Command::ProbePlay:
+            updateProbe();
+            if (probeState.serial == 0 || probeState.count == 0)
+                break;
+            audition.active = false; // one soloed thing at a time
+            probePlay.loop = (arg & 1) != 0;
+            probePlay.full = (arg & 2) != 0;
+            probePlay.pos = 0;
+            probePlay.tail = 0;
+            probePlay.active = true;
+            refreshProbeVoices (false);
+            if (probePlay.full)
+            {
+                probeSpring.reset();
+                for (int ch = 0; ch < kMaxChannels; ++ch)
+                {
+                    std::fill (probeRing[ch].begin(), probeRing[ch].end(), 0.0f);
+                    probeToneZ[ch] = probeHissHp[ch] = 0.0f;
+                }
+            }
             break;
         case Command::ClampTrace:
         case Command::UnclampTrace:
@@ -914,6 +985,7 @@ void EchoEngine::processBlock (float* const* io, int ioChannels, int numSamples,
         publishView();
     }
     stats.paused.store (paused, std::memory_order_relaxed);
+    stats.probeSerial.store (probeState.serial, std::memory_order_relaxed);
 }
 
 void EchoEngine::processPaused (float* const* io, int ioChannels, int numSamples) noexcept
@@ -2540,11 +2612,14 @@ void EchoEngine::processChunk (float* const* io, int ioChannels, int offset, int
 
 void EchoEngine::mixAudition (float* const* io, int ioChannels, int numSamples) noexcept
 {
-    if (! audition.active && audition.solo <= 0.0f)
+    if (! audition.active && ! probePlay.active && audition.solo <= 0.0f)
         return;
     // The trace must still be the one we started (it may have been replaced).
     if (audition.active && (audition.slot < 0 || store->slot (audition.slot).serial != audition.serial))
         audition.active = false;
+    const bool probing = probePlay.active;
+    if (probing)
+        renderProbe (ioChannels, numSamples);
 
     const float soloStep = 1.0f / std::max (1.0f, static_cast<float> (0.01 * sampleRate)); // 10 ms crossfade
     const int storeCh = store->numChannels();
@@ -2582,11 +2657,291 @@ void EchoEngine::mixAudition (float* const* io, int ioChannels, int numSamples) 
                 ++audition.pos;
             }
         }
-        audition.solo = std::clamp (audition.solo + (audition.active ? soloStep : -soloStep), 0.0f, 1.0f);
+        else if (probing)
+        {
+            for (int c = 0; c < ioChannels; ++c)
+                x[c] = probeBuf[c][static_cast<size_t> (i)];
+        }
+        const bool soloed = audition.active || probing;
+        audition.solo = std::clamp (audition.solo + (soloed ? soloStep : -soloStep), 0.0f, 1.0f);
         for (int c = 0; c < ioChannels; ++c)
             io[c][i] = io[c][i] * (1.0f - audition.solo) + x[c] * audition.solo;
     }
     stats.auditionSerial.store (audition.active ? audition.serial : 0, std::memory_order_relaxed);
+    stats.probePlaying.store (probePlay.active, std::memory_order_relaxed);
+}
+
+// ---- probe (Stage 11) ------------------------------------------------------------------
+
+void EchoEngine::updateProbe() noexcept
+{
+    if (probeState.serial == 0)
+        return;
+    const int position = store->positionOfSerial (probeState.serial);
+    if (position < 0)
+    {
+        probeState.serial = 0; // the probe trace is gone
+        probePlay.active = false;
+        return;
+    }
+    const int self = store->storedSlot (position);
+
+    // Per-set similarities of every trace to the probe (cached: they depend
+    // on memory, the probe, the similarity measure, focus and compare mode).
+    uint64_t featureSum = 0;
+    for (int i = 0; i < store->size(); ++i)
+    {
+        const auto& t = store->slot (store->storedSlot (i));
+        featureSum = featureSum * 1099511628211ull + (t.serial << 20) + t.featureVersion;
+    }
+    if (! probeState.simsValid || probeState.store != store.get() || probeState.storeSize != store->size()
+        || probeState.storeSerial != store->currentSerial() || probeState.featureSum != featureSum || probeState.kind != params.similarity
+        || probeState.focus != params.featureFocus)
+    {
+        const FeatureVector& cue = store->slot (self).features;
+        for (int i = 0; i < store->size(); ++i)
+        {
+            const int slot = store->storedSlot (i);
+            const auto& t = store->slot (slot);
+            const FeatureVector& target = probeState.next ? t.context : t.features;
+            auto& out = probeState.sims[static_cast<size_t> (slot)];
+            for (int set = 0; set < kNumSets; ++set)
+                out[static_cast<size_t> (set)] =
+                    set == 0 && params.featureFocus != FeatureFocus::Full
+                        ? focusedSimilarity (cue, target, params.similarity, params.featureFocus, 0, kSlots, false)
+                        : setSimilarity (cue.data() + setOffset (set), target.data() + setOffset (set), params.similarity);
+        }
+        probeState.simsValid = true;
+        probeState.store = store.get();
+        probeState.storeSize = store->size();
+        probeState.storeSerial = store->currentSerial();
+        probeState.featureSum = featureSum;
+        probeState.kind = params.similarity;
+        probeState.focus = params.featureFocus;
+    }
+
+    // Activations under the current address and retrieval settings (cheap).
+    const auto w = effectiveAddressWeights (params);
+    int used = 0, only = 0;
+    for (int set = 0; set < kNumSets; ++set)
+        if (w[static_cast<size_t> (set)] > 0.0f)
+        {
+            ++used;
+            only = set;
+        }
+    int n = 0;
+    for (int i = 0; i < store->size(); ++i)
+    {
+        const int slot = store->storedSlot (i);
+        probeState.activation[static_cast<size_t> (slot)] = 0.0f;
+        const auto& sims = probeState.sims[static_cast<size_t> (slot)];
+        float s;
+        if (used <= 1)
+            s = sims[static_cast<size_t> (used == 0 ? 0 : only)];
+        else
+        {
+            // The weighted mean, as addressSimilarity computes it.
+            double num = 0.0, den = 0.0;
+            for (int set = 0; set < kNumSets; ++set)
+                if (const float ws = w[static_cast<size_t> (set)]; ws > 0.0f)
+                {
+                    num += static_cast<double> (ws) * sims[static_cast<size_t> (set)];
+                    den += ws;
+                }
+            s = static_cast<float> (num / den);
+        }
+        probeState.combined[static_cast<size_t> (slot)] = s;
+        if (slot == self && ! probeState.includeSelf)
+            continue;
+        probeState.weights[static_cast<size_t> (n++)] = { slot, s, 0.0f, 0 };
+    }
+    auto rs = retrievalSettings();
+    rs.habituation = false; // the probe describes memory, not its recent history
+    const auto result = finishRetrieval (*store, rs, probeState.weights.data(), n);
+    probeState.count = result.numWeights;
+    probeState.intensity = result.intensity;
+    for (int k = 0; k < probeState.count; ++k)
+        probeState.activation[static_cast<size_t> (probeState.weights[static_cast<size_t> (k)].slot)] =
+            probeState.weights[static_cast<size_t> (k)].activation;
+
+    if (probePlay.active)
+        refreshProbeVoices (true);
+}
+
+void EchoEngine::refreshProbeVoices (bool crossfade) noexcept
+{
+    // The strongest contributors, with their echo gains (as a blended echo
+    // would mix them, at most Max Active Traces).
+    std::array<ProbeVoice, kProbeVoices> next {};
+    int count = 0;
+    const int limit = std::min (kProbeVoices, std::max (1, params.maxActive));
+    for (int k = 0; k < probeState.count; ++k)
+    {
+        const auto& e = probeState.weights[static_cast<size_t> (k)];
+        const ProbeVoice v { e.slot, store->slot (e.slot).serial, e.weight };
+        if (count < limit)
+            next[static_cast<size_t> (count++)] = v;
+        else
+        {
+            int weakest = 0;
+            for (int j = 1; j < count; ++j)
+                if (std::abs (next[static_cast<size_t> (j)].gain) < std::abs (next[static_cast<size_t> (weakest)].gain))
+                    weakest = j;
+            if (std::abs (v.gain) > std::abs (next[static_cast<size_t> (weakest)].gain))
+                next[static_cast<size_t> (weakest)] = v;
+        }
+    }
+    // Renormalise the kept gains so the level matches the full blend.
+    double kept = 0.0, all = 0.0;
+    for (int j = 0; j < count; ++j)
+        kept += std::abs (next[static_cast<size_t> (j)].gain);
+    for (int k = 0; k < probeState.count; ++k)
+        all += std::abs (probeState.weights[static_cast<size_t> (k)].weight);
+    if (kept > 0.0)
+        for (int j = 0; j < count; ++j)
+            next[static_cast<size_t> (j)].gain *= static_cast<float> (all / kept);
+
+    bool same = count == probePlay.curCount;
+    for (int j = 0; same && j < count; ++j)
+        same = next[static_cast<size_t> (j)].slot == probePlay.cur[static_cast<size_t> (j)].slot
+               && std::abs (next[static_cast<size_t> (j)].gain - probePlay.cur[static_cast<size_t> (j)].gain) < 1.0e-6f;
+    if (same && crossfade)
+        return;
+    if (crossfade)
+    {
+        probePlay.prev = probePlay.cur;
+        probePlay.prevCount = probePlay.curCount;
+        probePlay.xfadeLen = std::max<int64_t> (1, static_cast<int64_t> (0.02 * sampleRate));
+        probePlay.xfade = probePlay.xfadeLen;
+    }
+    else
+    {
+        probePlay.prevCount = 0;
+        probePlay.xfade = 0;
+    }
+    probePlay.cur = next;
+    probePlay.curCount = count;
+    int64_t length = 0;
+    for (int j = 0; j < count; ++j)
+        length = std::max (length, store->slot (next[static_cast<size_t> (j)].slot).end);
+    probePlay.length = std::max<int64_t> (1, length);
+}
+
+void EchoEngine::renderProbe (int ioChannels, int numSamples) noexcept
+{
+    // The blend: every voice plays from the start of its segment, as a
+    // blended echo does (traces keep their position within the segment).
+    const int storeCh = store->numChannels();
+    const auto fadeLen = std::max<int64_t> (1, static_cast<int64_t> (0.005 * sampleRate));
+    auto voiceSample = [&] (const ProbeVoice& v, int c, int64_t pos) -> float {
+        if (v.slot < 0)
+            return 0.0f;
+        const auto& t = store->slot (v.slot);
+        if (t.serial != v.serial || pos < t.begin || pos >= t.end)
+            return 0.0f;
+        const int64_t fade = std::max<int64_t> (1, std::min (fadeLen, (t.end - t.begin) / 4));
+        const float g = std::min ({ 1.0f, static_cast<float> (pos - t.begin + 1) / static_cast<float> (fade),
+                                    static_cast<float> (t.end - pos) / static_cast<float> (fade) });
+        return v.gain * g * t.audio[std::min (c, storeCh - 1)][pos];
+    };
+    int i = 0;
+    for (; i < numSamples && probePlay.active; ++i)
+    {
+        const bool inBlend = probePlay.pos < probePlay.length;
+        const float xf = probePlay.xfade > 0 ? static_cast<float> (probePlay.xfade) / static_cast<float> (probePlay.xfadeLen) : 0.0f;
+        for (int c = 0; c < ioChannels; ++c)
+        {
+            float v = 0.0f;
+            if (inBlend)
+            {
+                for (int j = 0; j < probePlay.curCount; ++j)
+                    v += (1.0f - xf) * voiceSample (probePlay.cur[static_cast<size_t> (j)], c, probePlay.pos);
+                for (int j = 0; xf > 0.0f && j < probePlay.prevCount; ++j)
+                    v += xf * voiceSample (probePlay.prev[static_cast<size_t> (j)], c, probePlay.pos);
+            }
+            probeBuf[c][static_cast<size_t> (i)] = v;
+        }
+        if (probePlay.xfade > 0)
+            --probePlay.xfade;
+        if (inBlend)
+        {
+            if (++probePlay.pos >= probePlay.length)
+            {
+                if (probePlay.loop)
+                    probePlay.pos = 0;
+                else
+                    probePlay.tail = probePlay.full ? static_cast<int64_t> ((0.2 + params.springDecaySeconds) * sampleRate) : 0;
+            }
+        }
+        else if (probePlay.tail-- <= 0)
+            probePlay.active = false; // done (after the full path's tail)
+    }
+    for (; i < numSamples; ++i)
+        for (int c = 0; c < ioChannels; ++c)
+            probeBuf[c][static_cast<size_t> (i)] = 0.0f;
+    if (probePlay.full)
+        probeEchoPath (ioChannels, numSamples);
+}
+
+void EchoEngine::probeEchoPath (int ioChannels, int numSamples) noexcept
+{
+    // The echo's colouring, on the probe's blend: wow and flutter, tone, tape
+    // drive and hiss, head 1 and echo level, spring. Its own state, so the
+    // plug-in's echo is untouched; no heads 2/3 and no feedback.
+    if (params.wow > 0.0f || params.flutter > 0.0f || probeMotion.isMoving())
+    {
+        probeMotion.fill (probeMotionBuf.data(), numSamples, params.wow, params.flutter);
+        const int mask = static_cast<int> (probeRing[0].size()) - 1;
+        int pos = probeRingPos;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float d = std::clamp (probeMotionBuf[static_cast<size_t> (i)], 0.0f, static_cast<float> (mask - 2));
+            const int di = static_cast<int> (d);
+            const float frac = d - static_cast<float> (di);
+            for (int c = 0; c < ioChannels; ++c)
+            {
+                auto& ring = probeRing[c];
+                ring[static_cast<size_t> (pos)] = probeBuf[c][static_cast<size_t> (i)];
+                const float a = ring[static_cast<size_t> ((pos - di) & mask)];
+                const float b = ring[static_cast<size_t> ((pos - di - 1) & mask)];
+                probeBuf[c][static_cast<size_t> (i)] = a + frac * (b - a);
+            }
+            pos = (pos + 1) & mask;
+        }
+        probeRingPos = pos;
+    }
+    const bool tone = params.echoToneHz < 19999.0f;
+    const float toneK = tone ? static_cast<float> (1.0 - std::exp (-2.0 * 3.14159265358979 * std::min (static_cast<double> (params.echoToneHz), 0.45 * sampleRate) / sampleRate))
+                             : 1.0f;
+    const float driveK = 1.0f + 4.0f * params.tapeDrive;
+    const float hiss = params.hissDb > kGateOffDb ? std::pow (10.0f, params.hissDb / 20.0f) : 0.0f;
+    const float level = levelToGain (params.echoLevelDb) * levelToGain (params.headLevelDb[0]);
+    const float springLevel = levelToGain (params.springLevelDb);
+    if (springLevel > 0.0f)
+        probeSpring.setDecay (params.springDecaySeconds);
+    for (int c = 0; c < ioChannels; ++c)
+    {
+        float* b = probeBuf[c].data();
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float v = b[i];
+            if (tone)
+                v = probeToneZ[c] += toneK * (v - probeToneZ[c]);
+            if (params.tapeDrive > 0.0f)
+                v = std::tanh (driveK * v) / driveK;
+            if (hiss > 0.0f)
+            {
+                probeHissRng = probeHissRng * 6364136223846793005ull + 1442695040888963407ull;
+                const float white = static_cast<float> (static_cast<int64_t> (probeHissRng >> 32) - 2147483648LL) * (1.0f / 2147483648.0f);
+                v += hiss * (white - probeHissHp[c]);
+                probeHissHp[c] = white;
+            }
+            v *= level;
+            if (springLevel > 0.0f)
+                v += springLevel * probeSpring.process (c, v);
+            b[i] = v;
+        }
+    }
 }
 
 void EchoEngine::publishView() noexcept
@@ -2619,6 +2974,11 @@ void EchoEngine::publishView() noexcept
         }
     }
 
+    // Probe (Stage 11): recomputed here, a few dozen times a second, only as
+    // far as something it depends on changed.
+    updateProbe();
+    const bool probing = probeState.serial != 0;
+
     const int n = std::min (store->size(), static_cast<int> (v.rows.size()));
     const int shownSet = dominantSet (effectiveAddressWeights (params));
     v.shownSet = shownSet;
@@ -2641,6 +3001,17 @@ void EchoEngine::publishView() noexcept
         r.generation = s.generation;
         r.mergeCount = s.mergeCount;
         r.clamped = s.clamped;
+        if (probing && probeState.simsValid)
+        {
+            r.probe = probeState.activation[static_cast<size_t> (slot)];
+            r.probeSim = probeState.combined[static_cast<size_t> (slot)];
+            r.probeSims = probeState.sims[static_cast<size_t> (slot)];
+        }
+        else
+        {
+            r.probe = r.probeSim = 0.0f;
+            r.probeSims = {};
+        }
 
         v.rowSlot[static_cast<size_t> (i)] = slot;
         const uint64_t key = (s.serial << 20) ^ s.featureVersion ^ (static_cast<uint64_t> (viewStoreEpoch) << 58)
@@ -2670,6 +3041,14 @@ void EchoEngine::publishView() noexcept
     v.sequence = params.sequenceContext;
     v.contextCue = static_cast<int> (params.contextCue);
     v.chain = params.cueSource == CueSource::EchoChain;
+    v.probeSerial = probing ? probeState.serial : 0;
+    v.probeNext = probeState.next;
+    v.probeIncludeSelf = probeState.includeSelf;
+    v.probePlaying = probePlay.active;
+    v.probeLoop = probePlay.loop;
+    v.probeFull = probePlay.full;
+    v.probeIntensity = probing ? probeState.intensity : 0.0f;
+    v.probeCount = probing ? probeState.count : 0;
     v.version = ++viewVersion;
 
     viewBack = viewMiddle.exchange (viewBack | kViewDirty, std::memory_order_acq_rel) & 3;

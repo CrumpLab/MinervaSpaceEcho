@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] - 2026-09-27
+
+### Stage 11: probing memory
+- **Probe** (side panel, or Shift-click a row): a trace's address used as a
+  cue, for inspection. Every trace is ranked by its activation, with its
+  similarity under the current Address and under each address set; the
+  matrix shows the probe's activations.
+- **Play echo** plays the probe's echo soloed, once or looped: the raw blend
+  of the answering traces, or through the echo's tone, tape, level and spring
+  (**Full path**). Click a ranked trace to hear it on its own.
+- Compare with traces' own addresses (**n vs n**) or with their context
+  (**n vs n−1**: what memory expects next); **Include itself**.
+- Everything updates as retrieval settings change, even while the echo loops.
+- Probing never changes memory, the random streams or the plug-in's output
+  (a test renders with and without probing and compares).
+
 ## [0.4.0] - 2026-09-27
 
 ### Stage 10: address sets
