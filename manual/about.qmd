@@ -21,12 +21,12 @@ memories are sounds. It was written with help from [Claude Code](https://claude.
 
 If you use MINERVA Space Echo in research, teaching or music, please cite it:
 
-> Crump, M. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software].
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software].
 > <https://github.com/CrumpLab/MinervaSpaceEcho>
 
 ```bibtex
 @software{crump_minerva_space_echo_2026,
-  author  = {Crump, Matthew},
+  author  = {Crump, Matthew J. C.},
   title   = {{MINERVA Space Echo}},
   year    = {2026},
   version = {0.1.0},

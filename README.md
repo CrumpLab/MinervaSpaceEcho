@@ -287,7 +287,7 @@ This is experimental software, written with help from [Claude Code](https://clau
 
 GitHub's **Cite this repository** button (from [`CITATION.cff`](CITATION.cff)) gives APA and BibTeX. For example:
 
-> Crump, M. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
+> Crump, M. J. C. (2026). *MINERVA Space Echo* (Version 0.1.0) [Computer software]. https://github.com/CrumpLab/MinervaSpaceEcho
 
 ## Licence
 
