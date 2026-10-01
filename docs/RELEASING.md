@@ -11,9 +11,14 @@
    ```
 3. CI builds and validates everything. On a `v*` tag the `release` job then
    creates a GitHub release with that version's changelog section, attaching
-   `MinervaSpaceEcho-x.y.z-macOS.pkg` (installer) and
-   `MinervaSpaceEcho-x.y.z-macOS.zip` (the bundles, for manual installs).
-   0.x versions are marked as pre-releases.
+   `MinervaSpaceEcho-macOS.pkg` (installer) and `MinervaSpaceEcho-macOS.zip`
+   (the bundles, for manual installs), and marks it as the latest release.
+   The file names have no version on purpose: the README's download link,
+   `https://github.com/CrumpLab/MinervaSpaceEcho/releases/latest/download/MinervaSpaceEcho-macOS.pkg`,
+   then always gets the newest release. (GitHub's "latest" skips
+   pre-releases, so releases are not marked as such.)
+4. Check the release page once the `build` run for the tag has finished
+   (about 10 minutes).
 
 ## Signing and notarization (optional)
 

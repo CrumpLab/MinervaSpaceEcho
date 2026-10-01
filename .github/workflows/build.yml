@@ -170,6 +170,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           # Release notes: this version's section of CHANGELOG.md.
           awk -v v="$VERSION" '$0 ~ "^## \\[?" v {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > notes.md
-          PRE=""
-          case "$VERSION" in 0.*) PRE="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --title "MINERVA Space Echo $VERSION" --notes-file notes.md $PRE
+          # Fixed file names, so .../releases/latest/download/MinervaSpaceEcho-macOS.pkg
+          # (linked from the README) always gets the newest release.
+          mkdir -p upload
+          cp dist/*-macOS.pkg upload/MinervaSpaceEcho-macOS.pkg
+          cp dist/*-macOS.zip upload/MinervaSpaceEcho-macOS.zip
+          gh release create "$GITHUB_REF_NAME" upload/* --title "MINERVA Space Echo $VERSION" --notes-file notes.md --latest

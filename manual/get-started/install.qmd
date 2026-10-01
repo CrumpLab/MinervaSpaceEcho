@@ -7,17 +7,19 @@ MINERVA Space Echo runs on macOS 11 or later, on Apple Silicon and Intel Macs, a
 
 ## Download
 
-Tagged versions are published on the [Releases page](https://github.com/CrumpLab/MinervaSpaceEcho/releases).
-For the newest build from any branch, open the repository's
-[Actions tab](https://github.com/CrumpLab/MinervaSpaceEcho/actions/workflows/build.yml), pick a green `build`
-run and download the **MinervaSpaceEcho-macOS** artifact (you need to be signed in to GitHub).
-
-Either way you get two files:
+**[Download the installer (MinervaSpaceEcho-macOS.pkg)](https://github.com/CrumpLab/MinervaSpaceEcho/releases/latest/download/MinervaSpaceEcho-macOS.pkg)**: always the newest release, no GitHub account
+needed. The [latest release page](https://github.com/CrumpLab/MinervaSpaceEcho/releases/latest) has the release notes and a zip of the plug-in files; older versions are
+on the [Releases page](https://github.com/CrumpLab/MinervaSpaceEcho/releases).
 
 | File | Use it to |
 |---|---|
-| `MinervaSpaceEcho-<version>-macOS.pkg` | Install the AU and VST3 into `/Library/Audio/Plug-Ins` (you can untick either). |
-| `MinervaSpaceEcho-<version>-macOS.zip` | Copy the plug-in bundles by hand. |
+| `MinervaSpaceEcho-macOS.pkg` | Install the AU and VST3 into `/Library/Audio/Plug-Ins` (you can untick either). |
+| `MinervaSpaceEcho-macOS.zip` | Copy the plug-in bundles by hand. |
+
+For the newest build from any branch (newer than the last release, less tested), open the repository's
+[Actions tab](https://github.com/CrumpLab/MinervaSpaceEcho/actions/workflows/build.yml), pick a green `build` run
+and download the **MinervaSpaceEcho-macOS** artifact (you need to be signed in to GitHub; its files have the
+version in their names).
 
 ### With the installer
 

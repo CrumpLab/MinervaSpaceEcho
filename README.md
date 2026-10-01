@@ -13,7 +13,30 @@ Brooklyn College of CUNY.
 See [`plan.md`](plan.md) for the concept and the staged build plan.
 
 **Status: version 0.5.0.** Every stage of the plan is built (see
-[`CHANGELOG.md`](CHANGELOG.md)); it has not yet been played in Live.
+[`CHANGELOG.md`](CHANGELOG.md)).
+
+## Download (macOS)
+
+No GitHub account or programming needed. For macOS 11 or later, Apple Silicon or Intel.
+
+1. **Download the installer:
+   [MinervaSpaceEcho-macOS.pkg](https://github.com/CrumpLab/MinervaSpaceEcho/releases/latest/download/MinervaSpaceEcho-macOS.pkg)**
+   (always the newest release).
+2. **Open it** (double-click it in your Downloads folder). The first time, macOS may say it
+   can't verify the developer, because the plug-in isn't signed with a paid Apple developer
+   account. Click **Done**, open **System Settings → Privacy & Security**, scroll down, click
+   **Open Anyway** next to the message about the installer, and confirm with your password.
+3. **Follow the installer.** It puts the Audio Unit and VST3 versions of the plug-in where
+   music software looks for them.
+4. **In Ableton Live:** open **Settings → Plug-Ins**, turn on **Use Audio Units v2** and/or
+   **Use VST3 Plug-In System Folders**, and click **Rescan**. The plug-in is in the browser
+   under **Plug-Ins → CrumpLab → MINERVA Space Echo**. Drag it onto an audio track.
+5. Then try the [first session](https://crumplab.github.io/MinervaSpaceEcho/get-started/first-session.html)
+   in the manual.
+
+Release notes, the zip with the plug-in files for installing by hand, and older versions are on
+the [latest release page](https://github.com/CrumpLab/MinervaSpaceEcho/releases/latest) (and the
+[list of all releases](https://github.com/CrumpLab/MinervaSpaceEcho/releases)).
 
 The plugin cuts the input into traces
 (1 bar by default, tempo-synced or free). It stores up to 100 of them and
@@ -231,18 +254,18 @@ Presets can change settings partway through a render with timed lines such as
 ## Getting a build on your Mac
 
 ### Option A: download a release or a CI build
-Every push builds a universal (Apple Silicon + Intel) AU and VST3 on GitHub
-Actions and validates them with `auval` and `pluginval`. Tagged versions are
-published on the repo's **Releases** page. For the latest build from any
-branch, open the **Actions** tab, pick a `build` run and download the
-`MinervaSpaceEcho-macOS` artifact.
+The [Download](#download-macos) section above is all most people need. Every
+push also builds a universal (Apple Silicon + Intel) AU and VST3 on GitHub
+Actions and validates them with `auval` and `pluginval`. For the latest build
+from any branch (newer than the last release, less tested), open the
+**Actions** tab, pick a `build` run and download the `MinervaSpaceEcho-macOS`
+artifact (you need to be signed in to GitHub).
 
-Either way you get two files:
+Releases have two files (CI builds name them with the version):
 
-- **`MinervaSpaceEcho-<version>-macOS.pkg`**: an installer that puts the AU
-  and VST3 in `/Library/Audio/Plug-Ins` (you can untick either format).
-- **`MinervaSpaceEcho-<version>-macOS.zip`**: the plug-in bundles, to copy by
-  hand:
+- **`MinervaSpaceEcho-macOS.pkg`**: an installer that puts the AU and VST3 in
+  `/Library/Audio/Plug-Ins` (you can untick either format).
+- **`MinervaSpaceEcho-macOS.zip`**: the plug-in bundles, to copy by hand:
   ```sh
   cp -R "MINERVA Space Echo.component" ~/Library/Audio/Plug-Ins/Components/
   cp -R "MINERVA Space Echo.vst3"      ~/Library/Audio/Plug-Ins/VST3/
