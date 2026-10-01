@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release (tag v<version from CMakeLists.txt>) from this build"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -149,8 +154,8 @@ jobs:
           retention-days: 30
 
   release:
-    name: GitHub release (tags v*)
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: GitHub release (tags v*, or Run workflow with "release")
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     needs: [linux, macos]
     runs-on: ubuntu-24.04
     permissions:
@@ -167,7 +172,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            # Run workflow: the version in CMakeLists.txt; the release creates the tag
+            # on the commit that was just built.
+            TAG="v$(sed -nE 's/^project\(.* VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
+          fi
+          VERSION="${TAG#v}"
           # Release notes: this version's section of CHANGELOG.md.
           awk -v v="$VERSION" '$0 ~ "^## \\[?" v {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > notes.md
           # Fixed file names, so .../releases/latest/download/MinervaSpaceEcho-macOS.pkg
@@ -175,4 +187,5 @@ jobs:
           mkdir -p upload
           cp dist/*-macOS.pkg upload/MinervaSpaceEcho-macOS.pkg
           cp dist/*-macOS.zip upload/MinervaSpaceEcho-macOS.zip
-          gh release create "$GITHUB_REF_NAME" upload/* --title "MINERVA Space Echo $VERSION" --notes-file notes.md --latest
+          gh release create "$TAG" upload/* --target "$GITHUB_SHA" --title "MINERVA Space Echo $VERSION" \
+            --notes-file notes.md --latest

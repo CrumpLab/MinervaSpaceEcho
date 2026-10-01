@@ -4,11 +4,16 @@
 
 1. Update the version in `CMakeLists.txt` (`project(... VERSION x.y.z)`) and
    add a `## [x.y.z] - date` section to `CHANGELOG.md`.
-2. Merge to the main branch, then tag and push:
-   ```sh
-   git tag vx.y.z
-   git push origin vx.y.z
-   ```
+2. Push the commit, then start the release in either of two ways:
+   - **From GitHub** (no terminal): **Actions → build → Run workflow**,
+     choose the branch, tick **Publish a release**, and click **Run
+     workflow**. The release (and its tag, `vx.y.z` from `CMakeLists.txt`)
+     is created on the commit that was built.
+   - **With a tag**:
+     ```sh
+     git tag vx.y.z
+     git push origin vx.y.z
+     ```
 3. CI builds and validates everything. On a `v*` tag the `release` job then
    creates a GitHub release with that version's changelog section, attaching
    `MinervaSpaceEcho-macOS.pkg` (installer) and `MinervaSpaceEcho-macOS.zip`
